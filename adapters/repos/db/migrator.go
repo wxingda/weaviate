@@ -31,6 +31,7 @@ import (
 	"github.com/weaviate/weaviate/entities/storobj"
 	"github.com/weaviate/weaviate/entities/vectorindex"
 	"github.com/weaviate/weaviate/usecases/replica"
+
 	schemaUC "github.com/weaviate/weaviate/usecases/schema"
 	"github.com/weaviate/weaviate/usecases/sharding"
 )
@@ -293,8 +294,9 @@ func (m *Migrator) UpdateShardStatus(ctx context.Context, className, shardName, 
 	return idx.updateShardStatus(ctx, shardName, targetStatus, schemaVersion)
 }
 
-// NewTenants creates new partitions
-func (m *Migrator) NewTenants(ctx context.Context, class *models.Class, creates []*schemaUC.CreateTenantPayload) error {
+// NewTenants creates new partitions and returns a commit func
+// that can be used to either commit or rollback the partitions
+func (m *Migrator) NewTenants(ctx context.Context, class *models.Class, creates []*schemaUC.CreateTenantPayload) (commit func(success bool), err error) {
 	idx := m.db.GetIndex(schema.ClassName(class.Class))
 	if idx == nil {
 		return fmt.Errorf("cannot find index for %q", class.Class)
@@ -314,7 +316,7 @@ func (m *Migrator) NewTenants(ctx context.Context, class *models.Class, creates 
 
 // UpdateTenants activates or deactivates tenant partitions and returns a commit func
 // that can be used to either commit or rollback the changes
-func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updates []*schemaUC.UpdateTenantPayload) error {
+func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updates []*schemaUC.UpdateTenantPayload) (commit func(success bool), err error) {
 	idx := m.db.GetIndex(schema.ClassName(class.Class))
 	if idx == nil {
 		return fmt.Errorf("cannot find index for %q", class.Class)
@@ -380,11 +382,12 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 	return ec.ToError()
 }
 
-// DeleteTenants deletes tenants
-// CAUTION: will not delete inactive tenants (shard files will not be removed)
-func (m *Migrator) DeleteTenants(ctx context.Context, class string, tenants []string) error {
-	if idx := m.db.GetIndex(schema.ClassName(class)); idx != nil {
-		return idx.dropShards(tenants)
+// DeleteTenants deletes tenants and returns a commit func
+// that can be used to either commit or rollback deletion
+func (m *Migrator) DeleteTenants(ctx context.Context, class string, tenants []string) (commit func(success bool), err error) {
+	idx := m.db.GetIndex(schema.ClassName(class))
+	if idx == nil {
+		return func(bool) {}, nil
 	}
 	return nil
 }

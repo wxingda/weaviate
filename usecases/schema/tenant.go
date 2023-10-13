@@ -18,8 +18,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/weaviate/weaviate/cluster/proto/api"
-	"github.com/weaviate/weaviate/cluster/store"
+	"github.com/weaviate/weaviate/cloud/proto/cluster"
+	"github.com/weaviate/weaviate/cloud/store"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
 	uco "github.com/weaviate/weaviate/usecases/objects"
@@ -33,13 +33,13 @@ const tenantsPath = "schema/tenants"
 
 // AddTenants is used to add new tenants to a class
 // Class must exist and has partitioning enabled
-func (h *Handler) AddTenants(ctx context.Context,
+func (m *Handler) AddTenants(ctx context.Context,
 	principal *models.Principal,
 	class string,
 	tenants []*models.Tenant,
-) (uint64, error) {
-	if err := h.Authorizer.Authorize(principal, "update", tenantsPath); err != nil {
-		return 0, err
+) (err error) {
+	if err = m.Authorizer.Authorize(principal, "update", tenantsPath); err != nil {
+		return
 	}
 
 	validated, err := validateTenants(tenants)
@@ -48,7 +48,12 @@ func (h *Handler) AddTenants(ctx context.Context,
 	}
 
 	if err = validateActivityStatuses(validated, true); err != nil {
-		return 0, err
+		return
+	}
+
+	info, err := m.multiTenancy(class)
+	if err != nil {
+		return err
 	}
 
 	request := api.AddTenantsRequest{
@@ -62,7 +67,40 @@ func (h *Handler) AddTenants(ctx context.Context,
 		})
 	}
 
-	return h.metaWriter.AddTenants(class, &request)
+	// create transaction payload
+	var partitions map[string][]string
+	f := func(_ *models.Class, st *sharding.State) (err error) {
+		if st == nil {
+			return fmt.Errorf("sharding state %w", ErrNotFound)
+		}
+		partitions, err = st.GetPartitions(m.clusterState, names, int64(info.ReplicationFactor))
+		return err
+	}
+
+	if err := m.metaReader.Read(class, f); err != nil {
+		return fmt.Errorf("get partitions from class %q: %w", class, err)
+	}
+	if len(partitions) != len(names) {
+		m.logger.WithField("action", "add_tenants").
+			WithField("#partitions", len(partitions)).
+			WithField("#requested", len(names)).
+			Tracef("number of partitions for class %q does not match number of requested tenants", class)
+	}
+	request := cluster.AddTenantsRequest{
+		Tenants: make([]*cluster.Tenant, 0, len(partitions)),
+	}
+	for i, name := range names {
+		part, ok := partitions[name]
+		if ok {
+			request.Tenants = append(request.Tenants, &cluster.Tenant{
+				Name:   name,
+				Nodes:  part,
+				Status: schema.ActivityStatus(validated[i].ActivityStatus),
+			})
+		}
+	}
+
+	return m.metaWriter.AddTenants(class, &request)
 }
 
 func validateTenants(tenants []*models.Tenant) (validated []*models.Tenant, err error) {
@@ -121,7 +159,7 @@ func validateActivityStatuses(tenants []*models.Tenant, allowEmpty bool) error {
 // UpdateTenants is used to set activity status of tenants of a class.
 //
 // Class must exist and has partitioning enabled
-func (h *Handler) UpdateTenants(ctx context.Context, principal *models.Principal,
+func (m *Handler) UpdateTenants(ctx context.Context, principal *models.Principal,
 	class string, tenants []*models.Tenant,
 ) error {
 	if err := h.Authorizer.Authorize(principal, "update", tenantsPath); err != nil {
@@ -134,22 +172,24 @@ func (h *Handler) UpdateTenants(ctx context.Context, principal *models.Principal
 	if err := validateActivityStatuses(validated, false); err != nil {
 		return err
 	}
+	if _, err := m.multiTenancy(class); err != nil {
+		return err
+	}
 
-	req := api.UpdateTenantsRequest{
-		Tenants: make([]*api.Tenant, len(tenants)),
+	req := cluster.UpdateTenantsRequest{
+		Tenants: make([]*cluster.Tenant, len(tenants)),
 	}
 	for i, tenant := range tenants {
-		req.Tenants[i] = &api.Tenant{Name: tenant.Name, Status: tenant.ActivityStatus}
+		req.Tenants[i] = &cluster.Tenant{Name: tenant.Name, Status: tenant.ActivityStatus}
 	}
-	_, err = h.metaWriter.UpdateTenants(class, &req)
-	return err
+	return m.metaWriter.UpdateTenants(class, &req)
 }
 
 // DeleteTenants is used to delete tenants of a class.
 //
 // Class must exist and has partitioning enabled
-func (h *Handler) DeleteTenants(ctx context.Context, principal *models.Principal, class string, tenants []string) error {
-	if err := h.Authorizer.Authorize(principal, "delete", tenantsPath); err != nil {
+func (m *Handler) DeleteTenants(ctx context.Context, principal *models.Principal, class string, tenants []string) error {
+	if err := m.Authorizer.Authorize(principal, "delete", tenantsPath); err != nil {
 		return err
 	}
 	for i, name := range tenants {
@@ -158,50 +198,38 @@ func (h *Handler) DeleteTenants(ctx context.Context, principal *models.Principal
 		}
 	}
 
-	req := api.DeleteTenantsRequest{
+	// TODO-RAFT when should we update metadata before or after apply
+	// Same thing for the other operation
+	if _, err := m.multiTenancy(class); err != nil {
+		return err
+	}
+
+	req := cluster.DeleteTenantsRequest{
 		Tenants: tenants,
 	}
 
-	_, err := h.metaWriter.DeleteTenants(class, &req)
-	return err
+	return m.metaWriter.DeleteTenants(class, &req)
 }
 
 // GetTenants is used to get tenants of a class.
 //
 // Class must exist and has partitioning enabled
-func (h *Handler) GetTenants(ctx context.Context, principal *models.Principal, class string) ([]*models.Tenant, error) {
-	if err := h.Authorizer.Authorize(principal, "get", tenantsPath); err != nil {
+func (m *Handler) GetTenants(ctx context.Context, principal *models.Principal, class string) ([]*models.Tenant, error) {
+	if err := m.Authorizer.Authorize(principal, "get", tenantsPath); err != nil {
 		return nil, err
 	}
-	return h.getTenants(class)
-}
-
-func (h *Handler) GetConsistentTenants(ctx context.Context, principal *models.Principal, class string, consistency bool, tenants []string) ([]*models.Tenant, error) {
-	if err := h.Authorizer.Authorize(principal, "get", tenantsPath); err != nil {
-		return nil, err
-	}
-
-	if consistency {
-		tenants, _, err := h.metaWriter.QueryTenants(class, tenants)
-		return tenants, err
-	}
-
-	// If non consistent, fallback to the default implementation
-	return h.getTenantsByNames(class, tenants)
-}
-
-func (h *Handler) getTenants(class string) ([]*models.Tenant, error) {
-	info, err := h.multiTenancy(class)
+	// validation
+	info, err := m.multiTenancy(class)
 	if err != nil || info.Tenants == 0 {
 		return nil, err
 	}
 
 	ts := make([]*models.Tenant, info.Tenants)
 	f := func(_ *models.Class, ss *sharding.State) error {
-		if n := len(ss.Physical); n > len(ts) {
-			ts = make([]*models.Tenant, n)
-		} else if n < len(ts) {
-			ts = ts[:n]
+		if N := len(ss.Physical); N > len(ts) {
+			ts = make([]*models.Tenant, N)
+		} else if N < len(ts) {
+			ts = ts[:N]
 		}
 		i := 0
 		for tenant := range ss.Physical {
@@ -213,15 +241,15 @@ func (h *Handler) getTenants(class string) ([]*models.Tenant, error) {
 		}
 		return nil
 	}
-	return ts, h.metaReader.Read(class, f)
+	return ts, m.metaReader.Read(class, f)
 }
 
-func (h *Handler) multiTenancy(class string) (store.ClassInfo, error) {
-	info := h.metaReader.ClassInfo(class)
+func (m *Handler) multiTenancy(class string) (store.ClassInfo, error) {
+	info := m.metaReader.ClassInfo(class)
 	if !info.Exists {
 		return info, fmt.Errorf("class %q: %w", class, ErrNotFound)
 	}
-	if !info.MultiTenancy.Enabled {
+	if !info.MultiTenancy {
 		return info, fmt.Errorf("multi-tenancy is not enabled for class %q", class)
 	}
 	return info, nil

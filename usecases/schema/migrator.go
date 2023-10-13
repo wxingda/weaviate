@@ -36,18 +36,20 @@ type UpdateTenantPayload struct {
 type Migrator interface {
 	AddClass(ctx context.Context, class *models.Class, shardingState *sharding.State) error
 	DropClass(ctx context.Context, className string) error
-	// UpdateClass(ctx context.Context, className string,newClassName *string) error
-	GetShardsQueueSize(ctx context.Context, className, tenant string) (map[string]int64, error)
-
+	UpdateClass(ctx context.Context, className string,
+		newClassName *string) error
 	AddProperty(ctx context.Context, className string,
 		props ...*models.Property) error
 	UpdateProperty(ctx context.Context, className string,
 		propName string, newName *string) error
 	UpdateIndex(ctx context.Context, class *models.Class, shardingState *sharding.State) error
 
-	NewTenants(ctx context.Context, class *models.Class, creates []*CreateTenantPayload) error
-	UpdateTenants(ctx context.Context, class *models.Class, updates []*UpdateTenantPayload) error
-	DeleteTenants(ctx context.Context, class string, tenants []string) error
+	NewTenants(ctx context.Context, class *models.Class, creates []*CreateTenantPayload) (commit func(success bool), err error)
+	UpdateTenants(ctx context.Context, class *models.Class, updates []*UpdateTenantPayload) (commit func(success bool), err error)
+	DeleteTenants(ctx context.Context, class string, tenants []string) (commit func(success bool), err error)
+
+	GetShardsStatus(ctx context.Context, className string) (map[string]string, error)
+	UpdateShardStatus(ctx context.Context, className, shardName, targetStatus string) error
 
 	GetShardsStatus(ctx context.Context, className, tenant string) (map[string]string, error)
 	UpdateShardStatus(ctx context.Context, className, shardName, targetStatus string, schemaVersion uint64) error
@@ -59,7 +61,4 @@ type Migrator interface {
 	ValidateInvertedIndexConfigUpdate(old, updated *models.InvertedIndexConfig) error
 	UpdateInvertedIndexConfig(ctx context.Context, className string,
 		updated *models.InvertedIndexConfig) error
-	UpdateReplicationFactor(ctx context.Context, className string, factor int64) error
-	WaitForStartup(context.Context) error
-	Shutdown(context.Context) error
 }

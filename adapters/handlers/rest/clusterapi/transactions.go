@@ -126,27 +126,12 @@ func (h *txHandler) incomingTransaction() http.Handler {
 	// 		return
 	// 	}
 
-	// 	var (
-	// 		txPayload interface{}
-	// 		err       error
-	// 	)
-	// 	switch h.handlerType {
-	// 	case schemaTX:
-	// 		txPayload, err = ucs.UnmarshalTransaction(payload.Type, payload.Payload)
-	// 		if err != nil {
-	// 			http.Error(w, errors.Wrap(err, "decode tx payload").Error(),
-	// 				http.StatusInternalServerError)
-	// 			return
-	// 		}
-	// 	case classifyTX:
-	// 		txPayload, err = classification.UnmarshalTransaction(payload.Type, payload.Payload)
-	// 		if err != nil {
-	// 			http.Error(w, errors.Wrap(err, "decode tx payload").Error(),
-	// 				http.StatusInternalServerError)
-	// 			return
-	// 		}
+	// 	txPayload, err := ucs.UnmarshalTransaction(payload.Type, payload.Payload)
+	// 	if err != nil {
+	// 		http.Error(w, errors.Wrap(err, "decode tx payload").Error(),
+	// 			http.StatusInternalServerError)
+	// 		return
 	// 	}
-
 	// 	txType := payload.Type
 	// 	tx := &cluster.Transaction{
 	// 		ID:       payload.ID,

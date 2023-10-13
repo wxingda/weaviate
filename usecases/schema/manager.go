@@ -32,18 +32,21 @@ import (
 // Manager Manages schema changes at a use-case level, i.e. agnostic of
 // underlying databases or storage providers
 type Manager struct {
-	validator    validator
+	migrator     Migrator
 	repo         SchemaStore
 	logger       logrus.FieldLogger
 	Authorizer   authorizer
 	config       config.Config
+	cluster      *cluster.TxManager
 	clusterState clusterState
 
 	sync.RWMutex
-	// The handler is responsible for well-defined tasks and should be decoupled from the manager.
-	// This enables API requests to be directed straight to the handler without the need to pass through the manager.
-	// For more context, refer to the handler's definition.
+	/// TODO-RAFT START
+	/// In the new design, the handler is responsible for well-defined tasks and should be decoupled from the manager.
+	/// This enables API requests to be directed straight to the handler without the need to pass through the manager.
+	/// For more context, refer to the handler's definition.
 	Handler
+	// TODO-RAFT END
 
 	metaReader
 }
@@ -94,48 +97,6 @@ func NewState(nClasses int) State {
 		},
 		ShardingState: make(map[string]*sharding.State, nClasses),
 	}
-}
-
-func (s State) EqualEnough(other *State) bool {
-	// Same number of classes
-	eqClassLen := len(s.ObjectSchema.Classes) == len(other.ObjectSchema.Classes)
-	if !eqClassLen {
-		return false
-	}
-
-	// Same sharding state length
-	eqSSLen := len(s.ShardingState) == len(other.ShardingState)
-	if !eqSSLen {
-		return false
-	}
-
-	for cls, ss1ss := range s.ShardingState {
-		// Same sharding state keys
-		ss2ss, ok := other.ShardingState[cls]
-		if !ok {
-			return false
-		}
-
-		// Same number of physical shards
-		eqPhysLen := len(ss1ss.Physical) == len(ss2ss.Physical)
-		if !eqPhysLen {
-			return false
-		}
-
-		for shard, ss1phys := range ss1ss.Physical {
-			// Same physical shard contents and status
-			ss2phys, ok := ss2ss.Physical[shard]
-			if !ok {
-				return false
-			}
-			eqActivStat := ss1phys.ActivityStatus() == ss2phys.ActivityStatus()
-			if !eqActivStat {
-				return false
-			}
-		}
-	}
-
-	return true
 }
 
 // SchemaStore is responsible for persisting the schema
@@ -209,7 +170,7 @@ type scaleOut interface {
 }
 
 // NewManager creates a new manager
-func NewManager(validator validator,
+func NewManager(migrator Migrator,
 	store metaWriter, metaReader metaReader,
 	repo SchemaStore,
 	logger logrus.FieldLogger, authorizer authorizer, config config.Config,
@@ -219,22 +180,25 @@ func NewManager(validator validator,
 	scaleoutManager scaleOut,
 ) (*Manager, error) {
 	handler, err := NewHandler(
-		store, metaReader, validator,
+		store, metaReader, migrator,
 		logger, authorizer,
-		config, configParser, vectorizerValidator, invertedConfigValidator,
+		config, hnswConfigParser, vectorizerValidator, invertedConfigValidator,
 		moduleConfig, clusterState, scaleoutManager)
 	if err != nil {
 		return nil, fmt.Errorf("cannot init handler: %w", err)
 	}
 	m := &Manager{
 		config:       config,
-		validator:    validator,
+		migrator:     migrator,
 		repo:         repo,
 		logger:       logger,
 		clusterState: clusterState,
 		Handler:      handler,
 		metaReader:   metaReader,
-		Authorizer:   authorizer,
+	}
+
+	if err := m.loadOrInitializeSchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("could not load or initialize schema: %v", err)
 	}
 
 	return m, nil
@@ -242,6 +206,66 @@ func NewManager(validator validator,
 
 type authorizer interface {
 	Authorize(principal *models.Principal, verb, resource string) error
+}
+
+func (m *Manager) loadOrInitializeSchema(ctx context.Context) error {
+	return nil
+	// localSchema, err := m.repo.Load(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("could not load schema:  %v", err)
+	// }
+	// if err := m.parseConfigs(ctx, &localSchema); err != nil {
+	// 	return errors.Wrap(err, "load schema")
+	// }
+
+	// if err := m.migrateSchemaIfNecessary(ctx, &localSchema); err != nil {
+	// 	return fmt.Errorf("migrate schema: %w", err)
+	// }
+
+	// // There was a bug that allowed adding the same prop multiple times. This
+	// // leads to a race at startup. If an instance is already affected by this,
+	// // this step can remove the duplicate ones.
+	// //
+	// // See https://github.com/weaviate/weaviate/issues/2609
+	// for _, c := range localSchema.ObjectSchema.Classes {
+	// 	c.Properties = m.deduplicateProps(c.Properties, c.Class)
+	// }
+
+	// // set internal state since it is used by startupClusterSync
+	// m.schemaCache.setState(localSchema)
+
+	// // make sure that all migrations have completed before checking sync,
+	// // otherwise two identical schemas might fail the check based on form rather
+	// // than content
+
+	// if err := m.startupClusterSync(ctx); err != nil {
+	// 	return errors.Wrap(err, "sync schema with other nodes in the cluster")
+	// }
+
+	// // store in persistent storage
+	// // TODO: investigate if save() is redundant because it is called in startupClusterSync()
+	// err = m.RLockGuard(func() error { return m.repo.Save(ctx, m.schemaCache.State) })
+	// if err != nil {
+	// 	return fmt.Errorf("store to persistent storage: %v", err)
+	// }
+
+	return nil
+}
+
+// StartServing indicates that the schema manager is ready to accept incoming
+// connections in cluster mode, i.e. it will accept opening transactions.
+//
+// Some transactions are exempt, such as ReadSchema which is required for nodes
+// to start up.
+//
+// This method should be called when all backends, primarily the DB, are ready
+// to serve.
+func (m *Manager) StartServing(ctx context.Context) error {
+	// only start accepting incoming connections when dangling txs have been
+	// resumed, otherwise there is potential for conflict
+	// m.cluster.StartAcceptIncoming()
+
+	return nil
 }
 
 // func (m *Manager) migrateSchemaIfNecessary(ctx context.Context, localSchema *State) error {
@@ -302,21 +326,55 @@ type authorizer interface {
 // 	return nil
 // }
 
-// func (m *Manager) checkShardingStateForReplication(ctx context.Context, localSchema *State) error {
-// 	for _, classState := range localSchema.ShardingState {
-// 		classState.MigrateFromOldFormat()
-// 	}
-// 	return nil
-// }
+func (m *Manager) checkShardingStateForReplication(ctx context.Context, localSchema *State) error {
+	for _, classState := range localSchema.ShardingState {
+		classState.MigrateFromOldFormat()
+	}
+	return nil
+}
 
-// func newSchema() *State {
-// 	return &State{
-// 		ObjectSchema: &models.Schema{
-// 			Classes: []*models.Class{},
-// 		},
-// 		ShardingState: map[string]*sharding.State{},
-// 	}
-// }
+func newSchema() *State {
+	return &State{
+		ObjectSchema: &models.Schema{
+			Classes: []*models.Class{},
+		},
+		ShardingState: map[string]*sharding.State{},
+	}
+}
+
+func (m *Manager) parseConfigs(ctx context.Context, schema *State) error {
+	// for _, class := range schema.ObjectSchema.Classes {
+	// 	for _, prop := range class.Properties {
+	// 		setPropertyDefaults(prop)
+	// 		migratePropertySettings(prop)
+	// 	}
+
+	// 	if err := m.parseVectorIndexConfig(class); err != nil {
+	// 		return errors.Wrapf(err, "class %s: vector index config", class.Class)
+	// 	}
+
+	// 	if err := m.parseShardingConfig(class); err != nil {
+	// 		return errors.Wrapf(err, "class %s: sharding config", class.Class)
+	// 	}
+
+	// 	// Pass dummy replication config with minimum factor 1. Otherwise the
+	// 	// setting is not backward-compatible. The user may have created a class
+	// 	// with factor=1 before the change was introduced. Now their setup would no
+	// 	// longer start up if the required minimum is now higher than 1. We want
+	// 	// the required minimum to only apply to newly created classes - not block
+	// 	// loading existing ones.
+	// 	if err := replica.ValidateConfig(class, replication.GlobalConfig{MinimumFactor: 1}); err != nil {
+	// 		return fmt.Errorf("replication config: %w", err)
+	// 	}
+	// }
+	// m.schemaCache.LockGuard(func() {
+	// 	for _, shardState := range schema.ShardingState {
+	// 		shardState.SetLocalName(m.clusterState.LocalName())
+	// 	}
+	// })
+
+	return nil
+}
 
 func (m *Manager) ClusterHealthScore() int {
 	return m.clusterState.ClusterHealthScore()
@@ -345,119 +403,47 @@ func (m *Manager) ResolveParentNodes(class, shardName string) (map[string]string
 	return name2Addr, nil
 }
 
-func (m *Manager) TenantsShards(class string, tenants ...string) (map[string]string, error) {
-	slices.Sort(tenants)
-	tenants = slices.Compact(tenants)
-	status, _, err := m.metaWriter.QueryTenantsShards(class, tenants...)
-	if !m.AllowImplicitTenantActivation(class) || err != nil {
-		return status, err
-	}
-
-	return m.activateTenantIfInactive(class, status)
+func (m *Manager) Nodes() []string {
+	return m.clusterState.AllNames()
 }
 
-// OptimisticTenantStatus tries to query the local state first. It is
-// optimistic that the state has already propagated correctly. If the state is
-// unexpected, i.e. either the tenant is not found at all or the status is
-// COLD, it will double-check with the leader.
-//
-// This way we accept false positives (for HOT tenants), but guarantee that there will never be
-// false negatives (i.e. tenants labelled as COLD that the leader thinks should
-// be HOT).
-//
-// This means:
-//
-//   - If a tenant is HOT locally (true positive), we proceed normally
-//   - If a tenant is HOT locally, but should be COLD (false positive), we still
-//     proceed. This is a conscious decision to keep the happy path free from
-//     (expensive) leader lookups.
-//   - If a tenant is not found locally, we assume it was recently created, but
-//     the state hasn't propagated yet. To verify, we check with the leader.
-//   - If a tenant is found locally, but is marked as COLD, we assume it was
-//     recently turned HOT, but the state hasn't propagated yet. To verify, we
-//     check with the leader
-//
-// Overall, we keep the (very common) happy path, free from expensive
-// leader-lookups and only fall back to the leader if the local result implies
-// an unhappy path.
-func (m *Manager) OptimisticTenantStatus(class string, tenant string) (map[string]string, error) {
-	var foundTenant bool
-	var status string
-	err := m.metaReader.Read(class, func(_ *models.Class, ss *sharding.State) error {
-		t, ok := ss.Physical[tenant]
-		if !ok {
-			return nil
-		}
+func (m *Manager) NodeName() string {
+	return m.clusterState.LocalName()
+}
 
-		foundTenant = true
-		status = t.Status
-		return nil
-	})
+func (m *Manager) GetShardsStatus(ctx context.Context, principal *models.Principal,
+	className string,
+) (models.ShardStatusList, error) {
+	err := m.Authorizer.Authorize(principal, "list", fmt.Sprintf("schema/%s/shards", className))
 	if err != nil {
 		return nil, err
 	}
 
-	if !foundTenant || status != models.TenantActivityStatusHOT {
-		// either no state at all or state does not imply happy path -> delegate to
-		// leader
-		return m.TenantsShards(class, tenant)
-	}
-
-	return map[string]string{
-		tenant: status,
-	}, nil
-}
-
-func (m *Manager) activateTenantIfInactive(class string,
-	status map[string]string,
-) (map[string]string, error) {
-	req := &api.UpdateTenantsRequest{
-		Tenants: make([]*api.Tenant, 0, len(status)),
-	}
-
-	for tenant, s := range status {
-		if s != models.TenantActivityStatusHOT {
-			req.Tenants = append(req.Tenants,
-				&api.Tenant{Name: tenant, Status: models.TenantActivityStatusHOT})
-		}
-	}
-
-	if len(req.Tenants) == 0 {
-		// nothing to do, all tenants are already HOT
-		return status, nil
-	}
-
-	_, err := m.metaWriter.UpdateTenants(class, req)
+	shardsStatus, err := m.migrator.GetShardsStatus(ctx, className)
 	if err != nil {
-		names := make([]string, len(req.Tenants))
-		for i, t := range req.Tenants {
-			names[i] = t.Name
-		}
-
-		return nil, fmt.Errorf("implicit activation of tenants %s: %w", strings.Join(names, ", "), err)
+		return nil, err
 	}
 
-	for _, t := range req.Tenants {
-		status[t.Name] = models.TenantActivityStatusHOT
+	resp := models.ShardStatusList{}
+
+	for name, status := range shardsStatus {
+		resp = append(resp, &models.ShardStatusGetResponse{
+			Name:   name,
+			Status: status,
+		})
 	}
 
-	return status, nil
+	return resp, nil
 }
 
-func (m *Manager) AllowImplicitTenantActivation(class string) bool {
-	allow := false
-	m.metaReader.Read(class, func(c *models.Class, _ *sharding.State) error {
-		allow = schema.AutoTenantActivationEnabled(c)
-		return nil
-	})
-
-	return allow
-}
-
-func (m *Manager) ShardOwner(class, shard string) (string, error) {
-	owner, _, err := m.metaWriter.QueryShardOwner(class, shard)
+func (m *Manager) UpdateShardStatus(ctx context.Context, principal *models.Principal,
+	className, shardName, targetStatus string,
+) error {
+	err := m.Authorizer.Authorize(principal, "update",
+		fmt.Sprintf("schema/%s/shards/%s", className, shardName))
 	if err != nil {
-		return "", err
+		return err
 	}
-	return owner, nil
+
+	return m.migrator.UpdateShardStatus(ctx, className, shardName, targetStatus)
 }
