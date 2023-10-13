@@ -250,6 +250,46 @@ func (m *Manager) loadOrInitializeSchema(ctx context.Context) error {
 	// }
 
 	return nil
+	// localSchema, err := m.repo.Load(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("could not load schema:  %v", err)
+	// }
+	// if err := m.parseConfigs(ctx, &localSchema); err != nil {
+	// 	return errors.Wrap(err, "load schema")
+	// }
+
+	// if err := m.migrateSchemaIfNecessary(ctx, &localSchema); err != nil {
+	// 	return fmt.Errorf("migrate schema: %w", err)
+	// }
+
+	// // There was a bug that allowed adding the same prop multiple times. This
+	// // leads to a race at startup. If an instance is already affected by this,
+	// // this step can remove the duplicate ones.
+	// //
+	// // See https://github.com/weaviate/weaviate/issues/2609
+	// for _, c := range localSchema.ObjectSchema.Classes {
+	// 	c.Properties = m.deduplicateProps(c.Properties, c.Class)
+	// }
+
+	// // set internal state since it is used by startupClusterSync
+	// m.schemaCache.setState(localSchema)
+
+	// // make sure that all migrations have completed before checking sync,
+	// // otherwise two identical schemas might fail the check based on form rather
+	// // than content
+
+	// if err := m.startupClusterSync(ctx); err != nil {
+	// 	return errors.Wrap(err, "sync schema with other nodes in the cluster")
+	// }
+
+	// // store in persistent storage
+	// // TODO: investigate if save() is redundant because it is called in startupClusterSync()
+	// err = m.RLockGuard(func() error { return m.repo.Save(ctx, m.schemaCache.State) })
+	// if err != nil {
+	// 	return fmt.Errorf("store to persistent storage: %v", err)
+	// }
+
+	//return nil
 }
 
 // StartServing indicates that the schema manager is ready to accept incoming

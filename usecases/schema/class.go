@@ -200,12 +200,6 @@ func (m *Handler) UpdateClass(ctx context.Context, principal *models.Principal,
 		}
 	}
 
-	if err := m.migrator.ValidateVectorIndexConfigUpdate(ctx,
-		initial.VectorIndexConfig.(schema.VectorIndexConfig),
-		updated.VectorIndexConfig.(schema.VectorIndexConfig)); err != nil {
-		return errors.Wrap(err, "vector index config")
-	}
-
 	if err := m.migrator.ValidateInvertedIndexConfigUpdate(ctx,
 		initial.InvertedIndexConfig, updated.InvertedIndexConfig); err != nil {
 		return errors.Wrap(err, "inverted index config")
