@@ -38,6 +38,8 @@ type Migrator interface {
 	DropClass(ctx context.Context, className string) error
 	UpdateClass(ctx context.Context, className string,
 		newClassName *string) error
+	GetShardsQueueSize(ctx context.Context, className, tenant string) (map[string]int64, error)
+
 	AddProperty(ctx context.Context, className string,
 		props ...*models.Property) error
 	UpdateProperty(ctx context.Context, className string,
@@ -48,14 +50,18 @@ type Migrator interface {
 	UpdateTenants(ctx context.Context, class *models.Class, updates []*UpdateTenantPayload) (commit func(success bool), err error)
 	DeleteTenants(ctx context.Context, class string, tenants []string) (commit func(success bool), err error)
 
-	GetShardsStatus(ctx context.Context, className string) (map[string]string, error)
+	GetShardsStatus(ctx context.Context, className, tenant string) (map[string]string, error)
 	UpdateShardStatus(ctx context.Context, className, shardName, targetStatus string) error
 
-	GetShardsStatus(ctx context.Context, className, tenant string) (map[string]string, error)
-	UpdateShardStatus(ctx context.Context, className, shardName, targetStatus string, schemaVersion uint64) error
+	// GetShardsStatus(ctx context.Context, className string) (map[string]string, error)
+	// UpdateShardStatus(ctx context.Context, className, shardName, targetStatus string) error
 
-	UpdateVectorIndexConfig(ctx context.Context, className string, updated schemaConfig.VectorIndexConfig) error
-	ValidateVectorIndexConfigsUpdate(old, updated map[string]schemaConfig.VectorIndexConfig) error
+	ValidateVectorIndexConfigUpdate(ctx context.Context,
+		old, updated schema.VectorIndexConfig) error
+	UpdateVectorIndexConfig(ctx context.Context, className string,
+		updated schema.VectorIndexConfig) error
+	ValidateVectorIndexConfigsUpdate(ctx context.Context,
+		old, updated map[string]schema.VectorIndexConfig) error
 	UpdateVectorIndexConfigs(ctx context.Context, className string,
 		updated map[string]schemaConfig.VectorIndexConfig) error
 	ValidateInvertedIndexConfigUpdate(old, updated *models.InvertedIndexConfig) error

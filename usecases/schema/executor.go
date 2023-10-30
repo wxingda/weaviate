@@ -155,9 +155,37 @@ func (m *executor) DeleteTenants(class string, req *cluster.DeleteTenantsRequest
 	return nil
 }
 
-func (m *executor) triggerSchemaUpdateCallbacks() {
-	s := m.store.ReadOnlySchema()
-	for _, cb := range m.callbacks {
+func (e *executor) UpdateShardStatus(req *cluster.UpdateShardStatusRequest) error {
+	ctx := context.Background()
+	return e.migrator.UpdateShardStatus(ctx, req.Class, req.Shard, req.Status)
+}
+
+// TODO-RAFT START
+// change GetShardsStatus() to accept a tenant parameter
+// TODO-RAFT END
+
+func (e *executor) GetShardsStatus(class string) (models.ShardStatusList, error) {
+	ctx := context.Background()
+	shardsStatus, err := e.migrator.GetShardsStatus(ctx, class, "") // tenant needed here
+	if err != nil {
+		return nil, err
+	}
+
+	resp := models.ShardStatusList{}
+
+	for name, status := range shardsStatus {
+		resp = append(resp, &models.ShardStatusGetResponse{
+			Name:   name,
+			Status: status,
+		})
+	}
+
+	return resp, nil
+}
+
+func (e *executor) triggerSchemaUpdateCallbacks() {
+	s := e.store.ReadOnlySchema()
+	for _, cb := range e.callbacks {
 		cb(schema.Schema{
 			Objects: &s,
 		})
