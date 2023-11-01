@@ -157,12 +157,16 @@ func (s *schemaHandlers) getSchema(params schema.SchemaDumpParams, principal *mo
 func (s *schemaHandlers) getShardsStatus(params schema.SchemaObjectsShardsGetParams,
 	principal *models.Principal,
 ) middleware.Responder {
-	var tenant string
-	if params.Tenant == nil {
-		tenant = ""
-	} else {
-		tenant = *params.Tenant
-	}
+	// TODO-RAFT START
+	// Fix changed interface GetShardsStatus -> ShardsStatus
+	// Previous definition:
+	// status, err := s.manager.GetShardsStatus(params.HTTPRequest.Context(), principal, params.ClassName, tenant)
+	// var tenant string
+	// if params.Tenant == nil {
+	// 	tenant = ""
+	// } else {
+	// 	tenant = *params.Tenant
+	// }
 
 	status, err := s.manager.ShardsStatus(params.HTTPRequest.Context(), principal, params.ClassName, tenant)
 	if err != nil {

@@ -82,6 +82,22 @@ type ModuleConfig interface {
 	ValidateClass(ctx context.Context, class *models.Class) error
 }
 
+// State is a cached copy of the schema that can also be saved into a remote
+// storage, as specified by Repo
+type State struct {
+	ObjectSchema  *models.Schema `json:"object"`
+	ShardingState map[string]*sharding.State
+}
+
+// NewState returns a new state with room for nClasses classes
+func NewState(nClasses int) State {
+	return State{
+		ObjectSchema: &models.Schema{
+			Classes: make([]*models.Class, 0, nClasses),
+		},
+		ShardingState: make(map[string]*sharding.State, nClasses),
+	}
+}
 
 // SchemaStore is responsible for persisting the schema
 // by providing support for both partial and complete schema updates
@@ -233,47 +249,7 @@ func (m *Manager) loadOrInitializeSchema(ctx context.Context) error {
 	// 	return fmt.Errorf("store to persistent storage: %v", err)
 	// }
 
-	return nil
-	// localSchema, err := m.repo.Load(ctx)
-	// if err != nil {
-	// 	return fmt.Errorf("could not load schema:  %v", err)
-	// }
-	// if err := m.parseConfigs(ctx, &localSchema); err != nil {
-	// 	return errors.Wrap(err, "load schema")
-	// }
-
-	// if err := m.migrateSchemaIfNecessary(ctx, &localSchema); err != nil {
-	// 	return fmt.Errorf("migrate schema: %w", err)
-	// }
-
-	// // There was a bug that allowed adding the same prop multiple times. This
-	// // leads to a race at startup. If an instance is already affected by this,
-	// // this step can remove the duplicate ones.
-	// //
-	// // See https://github.com/weaviate/weaviate/issues/2609
-	// for _, c := range localSchema.ObjectSchema.Classes {
-	// 	c.Properties = m.deduplicateProps(c.Properties, c.Class)
-	// }
-
-	// // set internal state since it is used by startupClusterSync
-	// m.schemaCache.setState(localSchema)
-
-	// // make sure that all migrations have completed before checking sync,
-	// // otherwise two identical schemas might fail the check based on form rather
-	// // than content
-
-	// if err := m.startupClusterSync(ctx); err != nil {
-	// 	return errors.Wrap(err, "sync schema with other nodes in the cluster")
-	// }
-
-	// // store in persistent storage
-	// // TODO: investigate if save() is redundant because it is called in startupClusterSync()
-	// err = m.RLockGuard(func() error { return m.repo.Save(ctx, m.schemaCache.State) })
-	// if err != nil {
-	// 	return fmt.Errorf("store to persistent storage: %v", err)
-	// }
-
-	//return nil
+	// return nil
 }
 
 // StartServing indicates that the schema manager is ready to accept incoming

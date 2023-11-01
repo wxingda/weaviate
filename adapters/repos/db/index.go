@@ -1168,13 +1168,7 @@ func (i *Index) exists(ctx context.Context, id strfmt.UUID,
 		return i.replicator.Exists(ctx, cl, shardName, id)
 	}
 
-	shard, release, err := i.getLocalShardNoShutdown(shardName)
-	if err != nil {
-		return exists, err
-	}
-
-	if shard != nil {
-		defer release()
+	if shard := i.localShard(shardName); shard != nil {
 		exists, err = shard.Exists(ctx, id)
 		if err != nil {
 			err = fmt.Errorf("exists locally: shard=%q: %w", shardName, err)
