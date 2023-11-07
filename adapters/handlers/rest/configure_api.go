@@ -134,7 +134,7 @@ func getCores() (int, error) {
 	return len(cores), nil
 }
 
-func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *state.State {
+func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup, isLocalhost bool) *state.State {
 	appState := startupRoutine(ctx, options)
 	setupGoProfiling(appState.ServerConfig.Config, appState.Logger)
 
@@ -262,17 +262,19 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 	// }
 
 	// TODO-RAFT START
+	//
 	nodeName := appState.Cluster.LocalName()
 	nodeAddr, _ := appState.Cluster.NodeHostname(nodeName)
 	addrs := strings.Split(nodeAddr, ":")
 
 	rConfig := schemav2.Config{
-		WorkDir:  filepath.Join(appState.ServerConfig.Config.Persistence.DataPath, "raft"),
-		NodeID:   nodeName,
-		Host:     addrs[0],
-		RaftPort: "1" + addrs[1],
-		DB:       nil,
-		Parser:   schema.NewParser(appState.Cluster, enthnsw.ParseAndValidateConfig),
+		WorkDir:         filepath.Join(appState.ServerConfig.Config.Persistence.DataPath, "raft"),
+		NodeID:          nodeName,
+		Host:            addrs[0],
+		RaftPort:        appState.ServerConfig.Config.Raft.Port,
+		BootstrapExpect: appState.ServerConfig.Config.Raft.BootstrapExpect,
+		DB:              nil,
+		Parser:          schema.NewParser(appState.Cluster, enthnsw.ParseAndValidateConfig),
 	}
 
 	fsm := schemav2.New(rConfig)
@@ -406,75 +408,84 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 		migrator.RecountProperties(ctx)
 	}
 
-	// TODO_RAFT START
-	appState.MetaStore = &fsm
+	// TODO-RAFT START
+	rpcAddr := addrs[0] + ":" + fmt.Sprintf("%d", appState.ServerConfig.Config.Raft.InternalRPCPort)
+	raftAddr := addrs[0] + ":" + fmt.Sprintf("%d", appState.ServerConfig.Config.Raft.Port)
 
-	boostrapper := addrs[1] == "7101"
-	candidateList := []schemav2.Candidate{
-		{ID: "node1", Address: addrs[0] + ":17101", NonVoter: false},
-		{ID: "node3", Address: addrs[0] + ":17105", NonVoter: false},
-		{ID: "node4", Address: addrs[0] + ":17107", NonVoter: false},
+	cluster := schemav2.NewCluster(&fsm, rpcAddr, strconv.Itoa(appState.ServerConfig.Config.Raft.InternalRPCPort))
+	if isLocalhost {
+		cluster.SetLocal()
 	}
-	raftNode, err := fsm.Open(boostrapper, candidateList)
-	if err != nil {
-		fmt.Printf("fsm.open %v", err.Error())
-		os.Exit(1)
-	}
-	cAddr := addrs[0] + ":2" + addrs[1]
-	cluster := schemav2.NewCluster(raftNode, cAddr)
 	if err := cluster.Open(); err != nil {
-		fmt.Printf("cluster.open %v", err.Error())
-		os.Exit(1)
+		appState.Logger.
+			WithField("action", "startup").
+			WithError(err).
+			Fatal("could not start raft cluster")
 	}
-	//if !boostrapper {
-	//serverAddress := addrs[0] + ":2" + "7101"
-	//raftAddress := addrs[0] + ":1" + addrs[1]
-	//cl := schemav2.NewClient(cluster)
-	//joinReq := proto.JoinPeerRequest{Id: nodeName, Address: raftAddress, Voter: true}
-	//err := cl.Join(serverAddress, &joinReq)
-	//if err != nil {
-	//	fmt.Printf("cluster.join %v", err.Error())
-	// os.Exit(1)
-	//}
-	//}
+
+	candidateList, err := resolveRaftAddresses(appState)
+	if err != nil {
+		appState.Logger.
+			WithField("action", "startup").
+			WithError(err).
+			Fatal("cannot resolve raft addresses using memberlist")
+	}
+
+	err = fsm.Open()
+	if err != nil {
+		appState.Logger.
+			WithField("action", "startup").
+			WithError(err).
+			Fatal("could not open fsm store")
+	}
+
+	cl := schemav2.NewClient(cluster)
+	bs := schemav2.NewBootstrapper(cl, nodeName, raftAddr)
+	bCtx, bCancel := context.WithTimeout(ctx, time.Second*60)
+	defer bCancel()
+	if err := bs.Do(bCtx, candidateList); err != nil {
+		appState.Logger.
+			WithField("action", "startup").
+			WithError(err).
+			Fatal("could not open fsm store")
+	}
+
 	// TODO-RAFT END
 
 	return appState
 }
 
-func parseNode2Port(appState *state.State) (m map[string]int, err error) {
-	m = make(map[string]int, len(appState.ServerConfig.Config.Raft.Join))
+// resolveRaftAddresses try to resolve as many addresses as possible
+// It iterate over Config.Raft.Join and resolve their names
+// The return slice might contain less the addresses
+func resolveRaftAddresses(appState *state.State) ([]string, error) {
+	node2port := make(map[string]string, len(appState.ServerConfig.Config.Raft.Join))
+	candidates := make([]string, 0, len(appState.ServerConfig.Config.Raft.Join))
 	for _, raftNamePort := range appState.ServerConfig.Config.Raft.Join {
 		np := strings.Split(raftNamePort, ":")
 		if np[0] == appState.Cluster.LocalName() {
-			m[np[0]] = appState.ServerConfig.Config.Raft.Port
+			node2port[np[0]] = strconv.Itoa(appState.ServerConfig.Config.Raft.Port)
+		} else {
+			node2port[np[0]] = np[1]
+		}
+	}
+	for name, raftPort := range node2port {
+		gHostPort, ok := appState.Cluster.NodeHostname(name)
+		if !ok && gHostPort == "" {
 			continue
 		}
-		if m[np[0]], err = strconv.Atoi(np[1]); err != nil {
-			return m, fmt.Errorf("expect integer as raft port: got %s:: %w", raftNamePort, err)
-		}
+		candidates = append(candidates, strings.Split(gHostPort, ":")[0]+":"+raftPort)
 	}
-
-	return m, nil
+	return candidates, nil
 }
 
-// parseVotersNames parses names of all voters.
-// If we reach this point, we assume that the configuration is valid
-func parseVotersNames(cfg config.Raft) (m map[string]struct{}) {
-	m = make(map[string]struct{}, cfg.BootstrapExpect)
-	for _, raftNamePort := range cfg.Join[:cfg.BootstrapExpect] {
-		m[strings.Split(raftNamePort, ":")[0]] = struct{}{}
-	}
-	return m
-}
-
-func configureAPI(api *operations.WeaviateAPI) http.Handler {
+func configureAPI(api *operations.WeaviateAPI, isLocalhost bool) http.Handler {
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
 
 	config.ServerVersion = parseVersionFromSwaggerSpec()
-	appState := MakeAppState(ctx, connectorOptionGroup)
+	appState := MakeAppState(ctx, connectorOptionGroup, isLocalhost)
 
 	api.ServeError = openapierrors.ServeError
 
