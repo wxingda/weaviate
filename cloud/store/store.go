@@ -98,6 +98,7 @@ func New(cfg Config) Store {
 
 func (f *Store) SetDB(db DB) {
 	f.db = db
+	f.schema.shardReader = db
 }
 
 func (st *Store) AddClass(cls *models.Class, ss *sharding.State) error {

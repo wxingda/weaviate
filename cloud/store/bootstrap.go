@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -67,7 +68,7 @@ func (b *Bootstrapper) join(ctx context.Context, servers []string) (leader strin
 			return addr, nil
 		}
 	}
-	return
+	return "", fmt.Errorf("could not join a cluster from %v", servers)
 }
 
 func (b *Bootstrapper) notify(ctx context.Context, servers []string) (err error) {

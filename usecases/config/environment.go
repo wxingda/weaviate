@@ -26,6 +26,20 @@ import (
 )
 
 const (
+	DefaultQueryMaximumResults            = int64(10000)
+	DefaultQueryNestedCrossReferenceLimit = int64(100000)
+)
+
+const (
+	DefaultHostname                           = "weaviate-0"
+	DefaultPersistenceFlushIdleMemtablesAfter = 60
+	DefaultPersistenceMemtablesMaxSize        = 200
+	DefaultPersistenceMemtablesMinDuration    = 15
+	DefaultPersistenceMemtablesMaxDuration    = 45
+	DefaultMaxConcurrentGetRequests           = 0
+	DefaultGRPCPort                           = 50051
+	DefaultMinimumReplicationFactor           = 1
+
 	DefaultRaftPort             = 8300
 	DefaultRaftInternalPort     = 8301
 	DefaultRaftGRPCMaxSize      = 1024 * 1024 * 1024
@@ -674,13 +688,10 @@ func parseResourceUsageEnvVars() (ResourceUsage, error) {
 func parseClusterConfig() (cluster.Config, error) {
 	cfg := cluster.Config{}
 
-	// by default memberlist assigns hostname to os.Hostname() incase hostname is empty
-	// ref: https://github.com/hashicorp/memberlist/blob/3f82dc10a89f82efe300228752f7077d0d9f87e4/config.go#L303
-	// it's handled at parseClusterConfig step to be consistent from the config start point and conveyed to all
-	// underlying functions see parseRAFTConfig(..) for example
-	cfg.Hostname = os.Getenv("CLUSTER_HOSTNAME")
-	if cfg.Hostname == "" {
-		cfg.Hostname, _ = os.Hostname()
+	if v := os.Getenv("CLUSTER_HOSTNAME"); v != "" {
+		cfg.Hostname = v
+	} else {
+		cfg.Hostname = DefaultHostname
 	}
 	cfg.Join = os.Getenv("CLUSTER_JOIN")
 

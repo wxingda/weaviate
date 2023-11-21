@@ -553,6 +553,40 @@ func (d *Compose) Start(ctx context.Context) (*DockerCompose, error) {
 		}
 		containers = append(containers, container)
 	}
+	if d.withWeaviate {
+		image := os.Getenv(envTestWeaviateImage)
+		hostname := Weaviate
+		if d.withWeaviateCluster {
+			envSettings["CLUSTER_HOSTNAME"] = "node1"
+			envSettings["CLUSTER_GOSSIP_BIND_PORT"] = "7100"
+			envSettings["CLUSTER_DATA_BIND_PORT"] = "7101"
+			envSettings["RAFT_PORT"] = "8300"
+			envSettings["RAFT_INTERNAL_PORT"] = "8301"
+			envSettings["RAFT_BOOTSTRAP_EXPECT"] = "1"
+		}
+		if d.withWeaviateBasicAuth {
+			envSettings["CLUSTER_BASIC_AUTH_USERNAME"] = d.withWeaviateBasicAuthUsername
+			envSettings["CLUSTER_BASIC_AUTH_PASSWORD"] = d.withWeaviateBasicAuthPassword
+		}
+		if d.withWeaviateAuth {
+			envSettings["AUTHENTICATION_OIDC_ENABLED"] = "true"
+			envSettings["AUTHENTICATION_OIDC_CLIENT_ID"] = "wcs"
+			envSettings["AUTHENTICATION_OIDC_ISSUER"] = "https://auth.wcs.api.semi.technology/auth/realms/SeMI"
+			envSettings["AUTHENTICATION_OIDC_USERNAME_CLAIM"] = "email"
+			envSettings["AUTHENTICATION_OIDC_GROUPS_CLAIM"] = "groups"
+			envSettings["AUTHORIZATION_ADMINLIST_ENABLED"] = "true"
+			envSettings["AUTHORIZATION_ADMINLIST_USERS"] = "ms_2d0e007e7136de11d5f29fce7a53dae219a51458@existiert.net"
+		}
+		for k, v := range d.weaviateEnvs {
+			envSettings[k] = v
+		}
+		container, err := startWeaviate(ctx, d.enableModules, d.defaultVectorizerModule,
+			envSettings, networkName, image, hostname, d.withWeaviateExposeGRPCPort)
+		if err != nil {
+			return nil, errors.Wrapf(err, "start %s", hostname)
+		}
+		containers = append(containers, container)
+	}
 	if d.withWeaviateCluster {
 		cs, err := d.startCluster(ctx, d.size, envSettings)
 		for _, c := range cs {
@@ -560,7 +594,30 @@ func (d *Compose) Start(ctx context.Context) (*DockerCompose, error) {
 				containers = append(containers, c)
 			}
 		}
-		return &DockerCompose{network, containers}, err
+		envSettings["RAFT_PORT"] = "8302"
+		envSettings["RAFT_INTERNAL_PORT"] = "8303"
+		envSettings["RAFT_JOIN"] = "node1:8300"
+		container, err := startWeaviate(ctx, d.enableModules, d.defaultVectorizerModule,
+			envSettings, networkName, image, hostname, d.withWeaviateExposeGRPCPort)
+		if err != nil {
+			return nil, errors.Wrapf(err, "start %s", hostname)
+		}
+		containers = append(containers, container)
+
+		hostname = WeaviateNode3
+		envSettings["CLUSTER_HOSTNAME"] = "node3"
+		envSettings["CLUSTER_GOSSIP_BIND_PORT"] = "7104"
+		envSettings["CLUSTER_DATA_BIND_PORT"] = "7105"
+		envSettings["CLUSTER_JOIN"] = fmt.Sprintf("%s:7100", Weaviate)
+		envSettings["RAFT_PORT"] = "8304"
+		envSettings["RAFT_INTERNAL_PORT"] = "8305"
+		envSettings["RAFT_JOIN"] = "node1:8300"
+		container, err = startWeaviate(ctx, d.enableModules, d.defaultVectorizerModule,
+			envSettings, networkName, image, hostname)
+		if err != nil {
+			return nil, errors.Wrapf(err, "start %s", hostname)
+		}
+		containers = append(containers, container)
 	}
 
 	if d.withSecondWeaviate {
