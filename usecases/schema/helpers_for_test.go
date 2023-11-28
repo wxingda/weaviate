@@ -28,7 +28,8 @@ import (
 	command "github.com/weaviate/weaviate/cloud/proto/cluster"
 	"github.com/weaviate/weaviate/cloud/store"
 	"github.com/weaviate/weaviate/entities/models"
-	"github.com/weaviate/weaviate/entities/schema"
+	schemaConfig "github.com/weaviate/weaviate/entities/schema/config"
+	"github.com/weaviate/weaviate/entities/vectorindex/common"
 	"github.com/weaviate/weaviate/usecases/config"
 	"github.com/weaviate/weaviate/usecases/scaler"
 	"github.com/weaviate/weaviate/usecases/sharding"
@@ -48,7 +49,8 @@ func newTestHandler(t *testing.T, db store.DB) (*Handler, func() raft.Future) {
 	handler, err := NewHandler(
 		writer, reader, &fakeValidator{}, logger, &fakeAuthorizer{nil},
 		cfg, dummyParseVectorConfig, vectorizerValidator, dummyValidateInvertedConfig,
-		&fakeModuleConfig{}, clusterstate, &fakeScaleOutManager{})
+		&fakeModuleConfig{}, clusterstate, &fakeScaleOutManager{},
+	)
 	require.Nil(t, err)
 	return &handler, cluster.Shutdown
 }
@@ -314,7 +316,11 @@ func (f fakeVectorConfig) IndexType() string {
 	return "fake"
 }
 
-func dummyParseVectorConfig(in interface{}) (schema.VectorIndexConfig, error) {
+func (f fakeVectorConfig) DistanceName() string {
+	return common.DistanceCosine
+}
+
+func dummyParseVectorConfig(in interface{}, vectorIndexType string) (schemaConfig.VectorIndexConfig, error) {
 	return fakeVectorConfig{raw: in}, nil
 }
 

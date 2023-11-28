@@ -68,7 +68,7 @@ type Handler struct {
 	vectorizerValidator     VectorizerValidator
 	moduleConfig            ModuleConfig
 	clusterState            clusterState
-	hnswConfigParser        VectorConfigParser
+	configParser            VectorConfigParser
 	invertedConfigValidator InvertedConfigValidator
 	scaleOut                scaleOut
 	parser                  Parser
@@ -80,21 +80,20 @@ func NewHandler(
 	metaReader metaReader,
 	migrator Migrator,
 	logger logrus.FieldLogger, authorizer authorizer, config config.Config,
-	hnswConfigParser VectorConfigParser, vectorizerValidator VectorizerValidator,
+	configParser VectorConfigParser, vectorizerValidator VectorizerValidator,
 	invertedConfigValidator InvertedConfigValidator,
 	moduleConfig ModuleConfig, clusterState clusterState,
 	scaleoutManager scaleOut,
 ) (Handler, error) {
-	m := Handler{
-		config:     config,
-		metaWriter: store,
-		metaReader: metaReader,
-		parser:     Parser{clusterState: clusterState, hnswConfigParser: hnswConfigParser},
-
-		migrator:                migrator,
+	handler := Handler{
+		config:                  config,
+		metaWriter:              store,
+		metaReader:              metaReader,
+		parser:                  Parser{clusterState: clusterState, configParser: configParser},
+		validator:               validator,
 		logger:                  logger,
 		Authorizer:              authorizer,
-		hnswConfigParser:        hnswConfigParser,
+		configParser:            configParser,
 		vectorizerValidator:     vectorizerValidator,
 		invertedConfigValidator: invertedConfigValidator,
 		moduleConfig:            moduleConfig,

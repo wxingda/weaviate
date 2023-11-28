@@ -182,7 +182,7 @@ func NewManager(migrator Migrator,
 	handler, err := NewHandler(
 		store, metaReader, migrator,
 		logger, authorizer,
-		config, hnswConfigParser, vectorizerValidator, invertedConfigValidator,
+		config, configParser, vectorizerValidator, invertedConfigValidator,
 		moduleConfig, clusterState, scaleoutManager)
 	if err != nil {
 		return nil, fmt.Errorf("cannot init handler: %w", err)
