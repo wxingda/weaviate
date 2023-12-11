@@ -31,7 +31,6 @@ const (
 )
 
 const (
-	DefaultHostname                           = "weaviate-0"
 	DefaultPersistenceFlushIdleMemtablesAfter = 60
 	DefaultPersistenceMemtablesMaxSize        = 200
 	DefaultPersistenceMemtablesMinDuration    = 15
@@ -396,6 +395,40 @@ func FromEnv(config *Config) error {
 	}
 
 	if err := parsePositiveInt(
+		"RAFT_INTERNAL_RPC_PORT",
+		func(val int) { config.Raft.InternalRPCPort = val },
+		DefaultRaftInternalPort,
+	); err != nil {
+		return err
+	}
+
+	parseStringList(
+		"RAFT_JOIN",
+		func(val []string) { config.Raft.Join = val },
+		// Default RAFT_JOIN must be the configured node name and the configured raft port. This allows us to have a one-node raft cluster
+		// able to bootstrap itself if the user doesn't pass any raft parameter.
+		[]string{fmt.Sprintf("%s:%d", config.Cluster.Hostname, config.Raft.InternalRPCPort)},
+	)
+
+	if err := parsePositiveInt(
+		"RAFT_BOOTSTRAP_TIMEOUT",
+		func(val int) { config.Raft.BootstrapTimeout = time.Second * time.Duration(val) },
+		DefaultRaftBootstrapTimeout,
+	); err != nil {
+		return err
+	}
+
+	if err := parsePositiveInt(
+		"RAFT_BOOTSTRAP_EXPECT",
+		func(val int) { config.Raft.BootstrapExpect = val },
+		DefaultRaftBootstrapExpect,
+	); err != nil {
+		return err
+	}
+
+	config.DisableGraphQL = Enabled(os.Getenv("DISABLE_GRAPHQL"))
+
+	if err := parsePositiveInt(
 		"REPLICATION_MINIMUM_FACTOR",
 		func(val int) { config.Replication.MinimumFactor = val },
 		DefaultMinimumReplicationFactor,
@@ -690,8 +723,6 @@ func parseClusterConfig() (cluster.Config, error) {
 
 	if v := os.Getenv("CLUSTER_HOSTNAME"); v != "" {
 		cfg.Hostname = v
-	} else {
-		cfg.Hostname = DefaultHostname
 	}
 	cfg.Join = os.Getenv("CLUSTER_JOIN")
 

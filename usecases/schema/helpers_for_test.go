@@ -77,7 +77,12 @@ func startRaftCluster(t *testing.T) (*store.Cluster, *store.Store, clusterState)
 		RaftElectionTimeout:  500 * time.Millisecond,
 		RaftHeartbeatTimeout: 500 * time.Millisecond,
 		Parser:               NewParser(clusterstate, dummyParseVectorConfig),
-	})
+		BootstrapExpect:      1,
+		Logger:               logger,
+		LogLevel:             "info",
+		Voter:                true,
+	}
+	srv := cloud.New(cfg)
 
 	raftNode, err := writer.Open(false, candidates)
 	require.Nil(t, err)
