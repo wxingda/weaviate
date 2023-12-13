@@ -395,40 +395,6 @@ func FromEnv(config *Config) error {
 	}
 
 	if err := parsePositiveInt(
-		"RAFT_INTERNAL_RPC_PORT",
-		func(val int) { config.Raft.InternalRPCPort = val },
-		DefaultRaftInternalPort,
-	); err != nil {
-		return err
-	}
-
-	parseStringList(
-		"RAFT_JOIN",
-		func(val []string) { config.Raft.Join = val },
-		// Default RAFT_JOIN must be the configured node name and the configured raft port. This allows us to have a one-node raft cluster
-		// able to bootstrap itself if the user doesn't pass any raft parameter.
-		[]string{fmt.Sprintf("%s:%d", config.Cluster.Hostname, config.Raft.InternalRPCPort)},
-	)
-
-	if err := parsePositiveInt(
-		"RAFT_BOOTSTRAP_TIMEOUT",
-		func(val int) { config.Raft.BootstrapTimeout = time.Second * time.Duration(val) },
-		DefaultRaftBootstrapTimeout,
-	); err != nil {
-		return err
-	}
-
-	if err := parsePositiveInt(
-		"RAFT_BOOTSTRAP_EXPECT",
-		func(val int) { config.Raft.BootstrapExpect = val },
-		DefaultRaftBootstrapExpect,
-	); err != nil {
-		return err
-	}
-
-	config.DisableGraphQL = Enabled(os.Getenv("DISABLE_GRAPHQL"))
-
-	if err := parsePositiveInt(
 		"REPLICATION_MINIMUM_FACTOR",
 		func(val int) { config.Replication.MinimumFactor = val },
 		DefaultMinimumReplicationFactor,
@@ -446,10 +412,7 @@ func FromEnv(config *Config) error {
 
 func parseRAFTConfig(hostname string) (Raft, error) {
 	// flag.IntVar()
-	cfg := Raft{
-		MetadataOnlyVoters: configbase.Enabled(os.Getenv("RAFT_METADATA_ONLY_VOTERS")),
-	}
-
+	cfg := Raft{}
 	if err := parsePositiveInt(
 		"RAFT_PORT",
 		func(val int) { cfg.Port = val },
@@ -462,14 +425,6 @@ func parseRAFTConfig(hostname string) (Raft, error) {
 		"RAFT_INTERNAL_RPC_PORT",
 		func(val int) { cfg.InternalRPCPort = val },
 		DefaultRaftInternalPort,
-	); err != nil {
-		return cfg, err
-	}
-
-	if err := parsePositiveInt(
-		"RAFT_GRPC_MESSAGE_MAX_SIZE",
-		func(val int) { cfg.RPCMessageMaxSize = val },
-		DefaultRaftGRPCMaxSize,
 	); err != nil {
 		return cfg, err
 	}
@@ -504,15 +459,6 @@ func parseRAFTConfig(hostname string) (Raft, error) {
 	); err != nil {
 		return cfg, err
 	}
-
-	if err := parsePositiveInt(
-		"RAFT_RECOVERY_TIMEOUT",
-		func(val int) { cfg.RecoveryTimeout = time.Second * time.Duration(val) },
-		3,
-	); err != nil {
-		return cfg, err
-	}
-
 	if err := parsePositiveInt(
 		"RAFT_ELECTION_TIMEOUT",
 		func(val int) { cfg.ElectionTimeout = time.Second * time.Duration(val) },
@@ -533,14 +479,6 @@ func parseRAFTConfig(hostname string) (Raft, error) {
 		"RAFT_SNAPSHOT_THRESHOLD",
 		func(val int) { cfg.SnapshotThreshold = uint64(val) },
 		8192, // raft default
-	); err != nil {
-		return cfg, err
-	}
-
-	if err := parsePositiveInt(
-		"RAFT_CONSISTENCY_WAIT_TIMEOUT",
-		func(val int) { cfg.ConsistencyWaitTimeout = time.Second * time.Duration(val) },
-		10,
 	); err != nil {
 		return cfg, err
 	}
@@ -725,11 +663,7 @@ func parseClusterConfig() (cluster.Config, error) {
 		cfg.Hostname = v
 	}
 	cfg.Join = os.Getenv("CLUSTER_JOIN")
-
-	advertiseAddr, advertiseAddrSet := os.LookupEnv("CLUSTER_ADVERTISE_ADDR")
-	advertisePort, advertisePortSet := os.LookupEnv("CLUSTER_ADVERTISE_PORT")
-
-	cfg.Localhost = configbase.Enabled(os.Getenv("CLUSTER_IN_LOCALHOST"))
+	cfg.Localhost = Enabled(os.Getenv("CLUSTER_IN_LOCALHOST"))
 	gossipBind, gossipBindSet := os.LookupEnv("CLUSTER_GOSSIP_BIND_PORT")
 	dataBind, dataBindSet := os.LookupEnv("CLUSTER_DATA_BIND_PORT")
 

@@ -59,12 +59,7 @@ func main() {
 		os.Exit(code)
 	}
 
-	// TODO-RAFT START
-	// Is this enough?
-	isLocal := server.Host == "127.0.0.1"|| server.Host == "localhost"
-	// TODO-RAFT END
-
-	server.ConfigureAPI(isLocal)
+	server.ConfigureAPI()
 
 	if err := server.Serve(); err != nil {
 		log.Fatalln(err)

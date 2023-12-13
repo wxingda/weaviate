@@ -30,6 +30,7 @@ import (
 )
 
 const (
+
 	// tcpMaxPool controls how many connections we will pool
 	tcpMaxPool = 3
 
@@ -37,16 +38,13 @@ const (
 	// the timeout by (SnapshotSize / TimeoutScale).
 	tcpTimeout = 10 * time.Second
 
-	raftDBName         = "raft.db"
-	logCacheCapacity   = 512 // TODO set higher
+	raftDBName = "raft.db"
+	// logCacheCapacity is the maximum number of logs to cache in-memory.
+	// This is used to reduce disk I/O for the recently committed entries.
+	logCacheCapacity = 512
+
 	nRetainedSnapShots = 1
 )
-
-type Candidate struct {
-	ID       string
-	Address  string
-	NonVoter bool
-}
 
 // Open opens this store and marked as such.
 func (st *Store) Open() (err error) {
@@ -97,7 +95,7 @@ func (st *Store) Open() (err error) {
 
 	go func() {
 		lastLeader := "Unknown"
-		t := time.NewTicker(time.Second * 5)
+		t := time.NewTicker(time.Second * 30)
 		defer t.Stop()
 		for range t.C {
 			leader := st.Leader()
@@ -365,15 +363,21 @@ func (s *Store) raftConfig() (raft.Configuration, error) {
 	return cfg.Configuration(), nil
 }
 
-func (f *Store) configureRaft() *raft.Config {
+func (st *Store) configureRaft() *raft.Config {
 	cfg := raft.DefaultConfig()
-	if f.raftHeartbeatTimeout != 0 {
-		cfg.HeartbeatTimeout = f.raftHeartbeatTimeout
+	if st.heartbeatTimeout > 0 {
+		cfg.HeartbeatTimeout = st.heartbeatTimeout
 	}
-	if f.raftElectionTimeout != 0 {
-		cfg.ElectionTimeout = f.raftElectionTimeout
+	if st.electionTimeout > 0 {
+		cfg.ElectionTimeout = st.electionTimeout
 	}
-	cfg.LocalID = raft.ServerID(f.nodeID)
-	cfg.SnapshotThreshold = 250 // TODO remove
+	if st.snapshotInterval > 0 {
+		cfg.SnapshotInterval = st.snapshotInterval
+	}
+	if st.snapshotThreshold > 0 {
+		cfg.SnapshotThreshold = st.snapshotThreshold
+	}
+	cfg.LocalID = raft.ServerID(st.nodeID)
+	cfg.LogLevel = st.logLevel
 	return cfg
 }

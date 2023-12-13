@@ -39,8 +39,6 @@ type Config struct {
 	IgnoreStartupSchemaSync bool       `json:"ignoreStartupSchemaSync" yaml:"ignoreStartupSchemaSync"`
 	SkipSchemaSyncRepair    bool       `json:"skipSchemaSyncRepair" yaml:"skipSchemaSyncRepair"`
 	AuthConfig              AuthConfig `json:"auth" yaml:"auth"`
-	AdvertiseAddr           string     `json:"advertiseAddr" yaml:"advertiseAddr"`
-	AdvertisePort           int        `json:"advertisePort" yaml:"advertisePort"`
 	// LocalHost flag enables running a multi-node setup with the same localhost and different ports
 	Localhost bool `json:"localhost" yaml:"localhost"`
 }
