@@ -97,9 +97,8 @@ func testGetSchemaWithoutClient(t *testing.T) {
 					},
 				},
 				"multiTenancyConfig": map[string]interface{}{
-					"enabled":              false,
-					"autoTenantCreation":   false,
-					"autoTenantActivation": false,
+					"enabled":            false,
+					"autoTenantCreation": false,
 				},
 			},
 		},

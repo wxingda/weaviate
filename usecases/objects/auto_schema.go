@@ -479,66 +479,72 @@ func (m *autoSchemaManager) determineNestedPropertiesOfArray(valArray []interfac
 	return nestedProperties, nil
 }
 
+type classTenants map[*models.Class]map[string]struct{}
+
 func (m *autoSchemaManager) autoTenants(ctx context.Context,
 	principal *models.Principal, objects []*models.Object,
-) (uint64, error) {
-	classTenants := make(map[string]map[string]struct{})
+) error {
+	ct := make(classTenants)
 
-	// group by tenants by class
 	for _, obj := range objects {
-		if _, ok := classTenants[obj.Class]; !ok {
-			classTenants[obj.Class] = map[string]struct{}{}
+		// TODO: track the classes we have already checked
+		//       before calling getClass again
+		o := models.Object{Class: obj.Class}
+		class, err := m.getClass(principal, &o)
+		if err != nil {
+			return err
 		}
-		classTenants[obj.Class][obj.Tenant] = struct{}{}
-	}
 
-	// collect classes
-	classes := []string{}
-	for className := range classTenants {
-		classes = append(classes, schema.UppercaseClassName(className))
-	}
-
-	vclasses, err := m.schemaManager.GetCachedClass(ctx, principal, classes...)
-	if err != nil {
-		return 0, err
-	}
-
-	// skip invalid classes, non-MT classes, no auto tenant creation classes
-	var maxSchemaVersion uint64
-	for className, tenantNames := range classTenants {
-		vclass, exists := vclasses[schema.UppercaseClassName(className)]
-		if !exists || // invalid class
-			vclass.Class == nil || // class is nil
-			!schema.MultiTenancyEnabled(vclass.Class) || // non-MT class
-			!vclass.Class.MultiTenancyConfig.AutoTenantCreation { // no auto tenant creation
+		// class not found in schema. this will have already
+		// been caught by b.validateObjectsConcurrently, and
+		// will be handled accordingly, so we don't need to
+		// do anything here
+		if class == nil {
 			continue
 		}
-		tenants := make([]*models.Tenant, len(tenantNames))
-		i := 0
-		for name := range tenantNames {
-			tenants[i] = &models.Tenant{Name: name}
-			i++
-		}
-		if err := m.addTenants(ctx, principal, className, tenants); err != nil {
-			return 0, fmt.Errorf("add tenants to class %q: %w", className, err)
-		}
 
-		if vclass.Version > maxSchemaVersion {
-			maxSchemaVersion = vclass.Version
+		if shouldAutoCreateTenants(class) {
+			cls, ok := ct[class]
+			if !ok {
+				ct[class] = map[string]struct{}{obj.Tenant: {}}
+				continue
+			}
+			cls[obj.Tenant] = struct{}{}
 		}
 	}
-	return maxSchemaVersion, nil
+
+	for c, ts := range ct {
+		l := make([]*models.Tenant, len(ts))
+		i := 0
+		for t := range ts {
+			l[i] = &models.Tenant{Name: t}
+			i++
+		}
+		if err := m.addTenants(ctx, principal, c, l); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *autoSchemaManager) addTenants(ctx context.Context, principal *models.Principal,
-	class string, tenants []*models.Tenant,
+	class *models.Class, tenants []*models.Tenant,
 ) error {
 	if len(tenants) == 0 {
 		return fmt.Errorf(
-			"tenants must be included for multitenant-enabled class %q", class)
+			"tenants must be included for multitenant-enabled class %q", class.Class)
 	}
-	if _, err := m.schemaManager.AddTenants(ctx, principal, class, tenants); err != nil {
-		return err
+	if err := m.schemaManager.AddTenants(ctx, principal, class.Class, tenants); err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
 	}
 	return nil
+}
+
+func shouldAutoCreateTenants(class *models.Class) bool {
+	if class.MultiTenancyConfig == nil {
+		return false
+	}
+	return class.MultiTenancyConfig.Enabled && class.MultiTenancyConfig.AutoTenantCreation
 }

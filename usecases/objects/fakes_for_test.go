@@ -139,6 +139,13 @@ func (f *fakeSchemaManager) AddClass(ctx context.Context, principal *models.Prin
 	return class, 0, nil
 }
 
+func (f *fakeSchemaManager) AddTenants(ctx context.Context,
+	principal *models.Principal, class string, tenants []*models.Tenant,
+) error {
+	f.tenantsEnabled = true
+	return nil
+}
+
 func (f *fakeSchemaManager) AddClassProperty(ctx context.Context, principal *models.Principal,
 	class *models.Class, merge bool, newProps ...*models.Property,
 ) (*models.Class, uint64, error) {

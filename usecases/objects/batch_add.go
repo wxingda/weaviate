@@ -47,19 +47,21 @@ func (b *BatchManager) AddObjects(ctx context.Context, principal *models.Princip
 	defer b.metrics.BatchOp("total_uc_level", before.UnixNano())
 	defer b.metrics.BatchDec()
 
+	return b.addObjects(ctx, principal, objects, fields, repl)
+}
+
+func (b *BatchManager) addObjects(ctx context.Context, principal *models.Principal,
+	objects []*models.Object, fields []*string, repl *additional.ReplicationProperties,
+) (BatchObjects, error) {
 	beforePreProcessing := time.Now()
-	if len(objects) == 0 {
-		return nil, errEmptyObjects
+	if err := b.validateObjectForm(objects); err != nil {
+		return nil, NewErrInvalidUserInput("invalid param 'objects': %v", err)
 	}
 
-	var maxSchemaVersion uint64
-	batchObjects, maxSchemaVersion := b.validateAndGetVector(ctx, principal, objects, repl)
-	schemaVersion, err := b.autoSchemaManager.autoTenants(ctx, principal, objects)
-	if err != nil {
+	batchObjects := b.validateObjectsConcurrently(ctx, principal, objects, fields, repl)
+
+	if err := b.autoSchemaManager.autoTenants(ctx, principal, objects); err != nil {
 		return nil, fmt.Errorf("auto create tenants: %w", err)
-	}
-	if schemaVersion > maxSchemaVersion {
-		maxSchemaVersion = schemaVersion
 	}
 
 	b.metrics.BatchOp("total_preprocessing", beforePreProcessing.UnixNano())
