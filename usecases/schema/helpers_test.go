@@ -66,6 +66,45 @@ func newTestHandlerWithCustomAuthorizer(t *testing.T, db store.Indexer, authoriz
 	return &handler, metaHandler
 }
 
+func newTestHandlerWithCustomAuthorizer(t *testing.T, db store.DB, authorizer authorizer) (*Handler, *fakeMetaHandler) {
+	cfg := config.Config{}
+	metaHandler := &fakeMetaHandler{}
+	logger, _ := test.NewNullLogger()
+	vectorizerValidator := &fakeVectorizerValidator{
+		valid: []string{
+			"model1", "model2",
+		},
+	}
+	handler, err := NewHandler(
+		metaHandler, metaHandler, &fakeValidator{}, logger, authorizer,
+		cfg, dummyParseVectorConfig, vectorizerValidator, dummyValidateInvertedConfig,
+		&fakeModuleConfig{}, newFakeClusterState(), &fakeScaleOutManager{})
+	require.Nil(t, err)
+	return &handler, metaHandler
+}
+
+type randomHostURL struct {
+	address string
+	host    string
+	port    int
+}
+
+func newRandomHostURL(t *testing.T) randomHostURL {
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {}),
+	)
+	defer srv.Close()
+	split := strings.Split(srv.URL, ":")
+	host := strings.TrimPrefix(split[1], "//")
+	port, err := strconv.Atoi(split[2])
+	require.Nil(t, err)
+	return randomHostURL{
+		address: srv.URL,
+		host:    host,
+		port:    port,
+	}
+}
+
 type fakeDB struct {
 	mock.Mock
 }
