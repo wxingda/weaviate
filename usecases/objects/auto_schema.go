@@ -19,8 +19,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	cloud_utils "github.com/weaviate/weaviate/cloud/utils"
 	"github.com/weaviate/weaviate/entities/additional"
 	"github.com/weaviate/weaviate/entities/classcache"
 	"github.com/weaviate/weaviate/entities/models"
@@ -72,63 +74,32 @@ func (m *autoSchemaManager) autoSchema(ctx context.Context, principal *models.Pr
 		classes = append(classes, schema.UppercaseClassName(object.Class))
 	}
 
-	vclasses, err := m.schemaManager.GetCachedClass(ctx, principal, classes...)
-	if err != nil {
-		return 0, err
+	if len(object.Class) == 0 {
+		// stop performing auto schema
+		return fmt.Errorf(validation.ErrorMissingClass)
 	}
 
-	for _, object := range objects {
-		if object == nil {
-			return 0, fmt.Errorf(validation.ErrorMissingObject)
+	object.Class = schema.UppercaseClassName(object.Class)
+
+	// Batch together the GetClass and subsequent createClass or updateClass to ensure we will retry if the schema changes
+	// have not yet propagated back to the follower node.
+	return backoff.Retry(func() error {
+		schemaClass, err := m.schemaManager.GetClass(ctx, principal, object.Class)
+		if err != nil {
+			return err
 		}
-
-		if len(object.Class) == 0 {
-			// stop performing auto schema
-			return 0, fmt.Errorf(validation.ErrorMissingClass)
-		}
-
-		object.Class = schema.UppercaseClassName(object.Class)
-
-		vclass := vclasses[schema.UppercaseClassName(object.Class)]
-
-		schemaClass := vclass.Class
-		schemaVersion := vclass.Version
-
 		if schemaClass == nil && !allowCreateClass {
-			return 0, fmt.Errorf("given class does not exist")
+			return fmt.Errorf("given class does not exist")
 		}
 		properties, err := m.getProperties(object)
 		if err != nil {
-			return 0, err
+			return err
 		}
-
 		if schemaClass == nil {
-			// it returns the newly created class and version
-			schemaClass, schemaVersion, err = m.createClass(ctx, principal, object.Class, properties)
-			if err != nil {
-				return 0, err
-			}
-
-			vclasses[schema.UppercaseClassName(object.Class)] = versioned.Class{Class: schemaClass, Version: schemaVersion}
-			classcache.RemoveClassFromContext(ctx, object.Class)
-		} else {
-			if newProperties := schema.DedupProperties(schemaClass.Properties, properties); len(newProperties) > 0 {
-				schemaClass, schemaVersion, err = m.schemaManager.AddClassProperty(ctx,
-					principal, schemaClass, true, newProperties...)
-
-				if err != nil {
-					return 0, err
-				}
-				vclasses[schema.UppercaseClassName(object.Class)] = versioned.Class{Class: schemaClass, Version: schemaVersion}
-				classcache.RemoveClassFromContext(ctx, object.Class)
-			}
+			return m.createClass(ctx, principal, object.Class, properties)
 		}
-
-		if schemaVersion > maxSchemaVersion {
-			maxSchemaVersion = schemaVersion
-		}
-	}
-	return maxSchemaVersion, nil
+		return m.updateClass(ctx, principal, object.Class, properties, schemaClass.Properties)
+	}, cloud_utils.NewBackoff())
 }
 
 func (m *autoSchemaManager) createClass(ctx context.Context, principal *models.Principal,

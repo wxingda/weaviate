@@ -16,7 +16,12 @@ import (
 	"fmt"
 	"time"
 
+	enterrors "github.com/weaviate/weaviate/entities/errors"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
+	cloud_utils "github.com/weaviate/weaviate/cloud/utils"
 	"github.com/weaviate/weaviate/entities/additional"
 	"github.com/weaviate/weaviate/entities/classcache"
 	"github.com/weaviate/weaviate/entities/models"
@@ -156,20 +161,56 @@ func (b *BatchManager) validateAndGetVector(ctx context.Context, principal *mode
 		originalIndexPerClass[obj.Class] = append(originalIndexPerClass[obj.Class], i)
 	}
 
-	for className, objectsForClass := range objectsPerClass {
-		class := classPerClassName[className]
-		errorsPerObj, err := b.modulesProvider.BatchUpdateVector(ctx, class, objectsForClass, b.findObject, b.logger)
-		if err != nil {
-			for i := range objectsForClass {
-				origIndex := originalIndexPerClass[className][i]
-				batchObjects[origIndex].Err = err
-			}
-		}
-		for i, err := range errorsPerObj {
-			origIndex := originalIndexPerClass[className][i]
-			batchObjects[origIndex].Err = err
-		}
+	object := &models.Object{}
+	object.LastUpdateTimeUnix = 0
+	object.ID = id
+	object.Vector = concept.Vector
+	object.Vectors = concept.Vectors
+	object.Tenant = concept.Tenant
+
+	if _, ok := fieldsToKeep["class"]; ok {
+		object.Class = concept.Class
 	}
+	if _, ok := fieldsToKeep["properties"]; ok {
+		object.Properties = concept.Properties
+	}
+
+	if object.Properties == nil {
+		object.Properties = map[string]interface{}{}
+	}
+	now := unixNow()
+	if _, ok := fieldsToKeep["creationTimeUnix"]; ok {
+		object.CreationTimeUnix = now
+	}
+	if _, ok := fieldsToKeep["lastUpdateTimeUnix"]; ok {
+		object.LastUpdateTimeUnix = now
+	}
+
+	// Batch together the GetClass and the validation function as the validation function will create/update the class
+	// if it already exists to match the object.
+	err = backoff.Retry(func() error {
+		class, err := b.schemaManager.GetClass(ctx, principal, object.Class)
+		if err != nil {
+			return err
+		}
+
+		if class == nil {
+			return fmt.Errorf("class '%s' not present in schema", object.Class)
+		}
+
+		err = validation.New(b.vectorRepo.Exists, b.config, repl).Object(ctx, class, object, nil)
+		if err != nil {
+			return err
+		}
+		// update vector only if we passed validation
+		err = b.modulesProvider.UpdateVector(ctx, object, class, b.findObject, b.logger)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}, cloud_utils.NewBackoff())
+	ec.Add(err)
 
 	return batchObjects, maxSchemaVersion
 }

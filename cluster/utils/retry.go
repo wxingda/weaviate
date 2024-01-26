@@ -20,11 +20,10 @@ import (
 // NewBackoff returns a Backoff that can be used to retry an operation
 // We have this function to ensure that we can use the same backoff settings in multiple places in weaviate.
 func NewBackoff() backoff.BackOff {
-	return ConstantBackoff(3, 50*time.Millisecond)
-}
-
-// ConstantBackoff is a backoff configuration used to handle getters
-// retry for eventual consistency handling
-func ConstantBackoff(maxrtry int, interval time.Duration) backoff.BackOff {
-	return backoff.WithMaxRetries(backoff.NewConstantBackOff(interval), uint64(maxrtry))
+	expBackoff := backoff.NewExponentialBackOff()
+	expBackoff.InitialInterval = 500 * time.Millisecond
+	expBackoff.RandomizationFactor = 0.5
+	expBackoff.Multiplier = 1.5
+	expBackoff.MaxElapsedTime = 3 * time.Second
+	return backoff.WithMaxRetries(expBackoff, 3)
 }
