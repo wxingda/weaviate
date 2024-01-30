@@ -18,15 +18,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/weaviate/weaviate/test/docker"
-	"golang.org/x/sync/errgroup"
 )
 
-// TODO-RAFT current tests doesn't force containers to change their IPs
-// we need to add test were the actual container ip changes on stop if possible with testcontainer
-// if not we need to terminate the whole container to pick up new IP and copy the old container filesystem
-// to the new one to force recovery
 func TestRecovery(t *testing.T) {
 	t.Setenv("TEST_WEAVIATE_IMAGE", "weaviate/test-server")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -46,22 +42,17 @@ func TestRecovery(t *testing.T) {
 	container2Ip := compose.ContainerURI(2)
 	container3Ip := compose.ContainerURI(3)
 
-	<-time.After(3 * time.Second) // wait for memberlist
+	<-time.After(2 * time.Second) // wait for memberlist
 
-	eg := errgroup.Group{}
-	for idx := 1; idx <= 3; idx++ {
-		require.Nil(t, compose.StopAt(ctx, idx, nil))
-		i := idx // catch idx for eg
-		if i > 1 {
-			time.Sleep(2 * time.Second)
-		}
-		eg.Go(func() error {
-			require.Nil(t, compose.StartAt(ctx, i))
-			return nil
-		})
-	}
+	// restart cluster with different IPs
+	require.Nil(t, compose.StopAt(ctx, 1, nil))
+	require.Nil(t, compose.StopAt(ctx, 2, nil))
+	require.Nil(t, compose.StopAt(ctx, 3, nil))
 
-	eg.Wait()
+	require.Nil(t, compose.StartAt(ctx, 1))
+	require.Nil(t, compose.StartAt(ctx, 2))
+	require.Nil(t, compose.StartAt(ctx, 3))
+
 	// ips shouldn't be equal
 	require.NotEqual(t, container1Ip, compose.ContainerURI(1))
 	require.NotEqual(t, container2Ip, compose.ContainerURI(2))

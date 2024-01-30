@@ -22,13 +22,43 @@ import (
 	"github.com/hashicorp/raft"
 	command "github.com/weaviate/weaviate/cloud/proto/cluster"
 	"github.com/weaviate/weaviate/entities/models"
-	"github.com/weaviate/weaviate/usecases/sharding"
+	"github.com/weaviate/weaviate/usecases/cluster"
 	"google.golang.org/protobuf/proto"
 )
 
-type DB interface {
-	AddClass(pl command.AddClassRequest) error
-	UpdateClass(req command.UpdateClassRequest) error
+const (
+
+	// tcpMaxPool controls how many connections we will pool
+	tcpMaxPool = 3
+
+	// tcpTimeout is used to apply I/O deadlines. For InstallSnapshot, we multiply
+	// the timeout by (SnapshotSize / TimeoutScale).
+	tcpTimeout = 10 * time.Second
+
+	raftDBName = "raft.db"
+
+	peersFileName = "peers.json"
+
+	// logCacheCapacity is the maximum number of logs to cache in-memory.
+	// This is used to reduce disk I/O for the recently committed entries.
+	logCacheCapacity = 512
+
+	nRetainedSnapShots = 1
+)
+
+var (
+	// ErrNotLeader is returned when an operation can't be completed on a
+	// follower or candidate node.
+	ErrNotLeader      = errors.New("node is not the leader")
+	ErrLeaderNotFound = errors.New("leader not found")
+	ErrNotOpen        = errors.New("store not open")
+)
+
+// Indexer interface updates both the collection and its indices in the filesystem.
+// This is distinct from updating metadata, which is handled through a different interface.
+type Indexer interface {
+	AddClass(cmd.AddClassRequest) error
+	UpdateClass(cmd.UpdateClassRequest) error
 	DeleteClass(string) error
 	AddProperty(string, command.AddPropertyRequest) error
 	AddTenants(class string, req *command.AddTenantsRequest) error
@@ -51,6 +81,7 @@ type Config struct {
 
 	HeartbeatTimeout  time.Duration
 	ElectionTimeout   time.Duration
+	RecoveryTimeout   time.Duration
 	SnapshotInterval  time.Duration
 	SnapshotThreshold uint64
 
@@ -59,12 +90,14 @@ type Config struct {
 }
 
 type Store struct {
-	raft *raft.Raft
+	raft    *raft.Raft
+	cluster cluster.Reader
 
 	open              atomic.Bool
 	raftDir           string
 	raftPort          int
 	bootstrapExpect   int
+	recoveryTimeout   time.Duration
 	heartbeatTimeout  time.Duration
 	electionTimeout   time.Duration
 	snapshotInterval  time.Duration
@@ -83,12 +116,13 @@ type Store struct {
 	candidates map[string]string
 }
 
-func New(cfg Config) Store {
+func New(cfg Config, cluster cluster.Reader) Store {
 	return Store{
 		raftDir:           cfg.WorkDir,
 		raftPort:          cfg.RaftPort,
 		bootstrapExpect:   cfg.BootstrapExpect,
 		candidates:        make(map[string]string, cfg.BootstrapExpect),
+		recoveryTimeout:   cfg.RecoveryTimeout,
 		heartbeatTimeout:  cfg.HeartbeatTimeout,
 		electionTimeout:   cfg.ElectionTimeout,
 		snapshotInterval:  cfg.SnapshotInterval,
@@ -96,9 +130,8 @@ func New(cfg Config) Store {
 		applyTimeout:      time.Second * 20,
 		nodeID:            cfg.NodeID,
 		host:              cfg.Host,
-		schema:            NewSchema(cfg.NodeID, cfg.DB),
-		db:                cfg.DB,
-		parser:            cfg.Parser,
+		cluster:           cluster,
+		db:                localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser},
 		log:               cfg.Logger,
 		logLevel:          cfg.LogLevel,
 	}
@@ -109,9 +142,18 @@ func (f *Store) SetDB(db DB) {
 	f.schema.shardReader = db
 }
 
-func (st *Store) AddClass(cls *models.Class, ss *sharding.State) error {
-	req := command.AddClassRequest{Class: cls, State: ss}
-	subCommand, err := json.Marshal(&req)
+	if err := st.genPeersFileFromBolt(
+		filepath.Join(st.raftDir, raftDBName),
+		filepath.Join(st.raftDir, peersFileName)); err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(st.raftDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", st.raftDir, err)
+	}
+
+	// log store
+	st.logStore, err = raftbolt.NewBoltStore(filepath.Join(st.raftDir, raftDBName))
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
@@ -152,10 +194,78 @@ func (st *Store) RestoreClass(cls *models.Class, ss *sharding.State) error {
 		return fmt.Errorf("marshal command: %w", err)
 	}
 
-	fut := f.raft.Apply(cmdBytes, f.raftApplyTimeout)
-	if err := fut.Error(); err != nil {
-		if errors.Is(err, raft.ErrNotLeader) {
-			return ErrNotLeader
+	// tcp transport
+	address := fmt.Sprintf("%s:%d", st.host, st.raftPort)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return fmt.Errorf("net.ResolveTCPAddr address=%v: %w", address, err)
+	}
+
+	st.transport, err = raft.NewTCPTransport(address, tcpAddr, tcpMaxPool, tcpTimeout, os.Stdout)
+	if err != nil {
+		return fmt.Errorf("raft.NewTCPTransport  address=%v tcpAddress=%v maxPool=%v timeOut=%v: %w", address, tcpAddr, tcpMaxPool, tcpTimeout, err)
+	}
+
+	st.log.Info("raft tcp transport", "address", address, "tcpMaxPool", tcpMaxPool, "tcpTimeout", tcpTimeout)
+
+	rLog := rLog{st.logStore}
+	st.initialLastAppliedIndex, err = rLog.LastAppliedCommand()
+	if err != nil {
+		return fmt.Errorf("read log last command: %w", err)
+	}
+
+	if st.initialLastAppliedIndex == snapshotIndex(snapshotStore) {
+		st.loadDatabase(ctx)
+	}
+
+	existedConfig, err := st.configViaPeers(filepath.Join(st.raftDir, peersFileName))
+	if err != nil {
+		return err
+	}
+
+	if servers, recover := st.recoverable(existedConfig.Servers); recover {
+		st.log.Info("recovery: start recovery with",
+			"peers", servers,
+			"snapshot_index", snapshotIndex(snapshotStore),
+			"last_applied_log_index", st.initialLastAppliedIndex)
+
+		if err := raft.RecoverCluster(st.raftConfig(), st, logCache, st.logStore, snapshotStore, st.transport, raft.Configuration{
+			Servers: servers,
+		}); err != nil {
+			return fmt.Errorf("raft recovery failed: %w", err)
+		}
+
+		// load the database if <= because RecoverCluster() will implicitly
+		// commits all entries in the previous Raft log before starting
+		if st.initialLastAppliedIndex <= snapshotIndex(snapshotStore) {
+			st.loadDatabase(ctx)
+		}
+
+		st.log.Info("recovery: succeeded from previous configuration",
+			"peers", servers,
+			"snapshot_index", snapshotIndex(snapshotStore),
+			"last_applied_log_index", st.initialLastAppliedIndex)
+	}
+
+	// raft node
+	st.raft, err = raft.NewRaft(st.raftConfig(), st, logCache, st.logStore, snapshotStore, st.transport)
+	if err != nil {
+		return fmt.Errorf("raft.NewRaft %v %w", address, err)
+	}
+
+	st.log.Info("starting raft", "applied_index", st.raft.AppliedIndex(), "last_index",
+		st.raft.LastIndex(), "last_log_index", st.initialLastAppliedIndex)
+
+	go func() {
+		lastLeader := "Unknown"
+		t := time.NewTicker(time.Second * 30)
+		defer t.Stop()
+		for range t.C {
+			leader := st.Leader()
+			if leader != lastLeader {
+				lastLeader = leader
+				st.log.Info("current Leader", "address", lastLeader)
+			}
 		}
 		return err
 	}

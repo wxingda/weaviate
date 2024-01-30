@@ -364,7 +364,17 @@ func (i *Index) IncomingOverwriteObjects(ctx context.Context,
 	return i.OverwriteObjects(ctx, shardName, vobjects)
 }
 
-func (i *Index) DigestObjects(ctx context.Context,
+func (db *DB) DigestObjects(ctx context.Context,
+	class, shardName string, ids []strfmt.UUID,
+) (result []replica.RepairResponse, err error) {
+	index := db.GetIndex(schema.ClassName(class))
+	if index == nil {
+		return nil, fmt.Errorf("index for class %v not found locally", index)
+	}
+	return index.digestObjects(ctx, shardName, ids)
+}
+
+func (i *Index) digestObjects(ctx context.Context,
 	shardName string, ids []strfmt.UUID,
 ) (result []replica.RepairResponse, err error) {
 	result = make([]replica.RepairResponse, len(ids))

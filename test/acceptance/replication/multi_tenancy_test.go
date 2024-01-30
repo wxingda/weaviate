@@ -235,9 +235,8 @@ func multiTenancyEnabled(t *testing.T) {
 			assert.Equal(t, newTitle, newVal)
 		})
 
-		t.Run("RestartNode-3", func(t *testing.T) {
-			startNodeAt(ctx, t, compose, 3)
-			time.Sleep(time.Second)
+		t.Run("restart node 2", func(t *testing.T) {
+			startNodeAt(ctx, t, compose, 2)
 		})
 	})
 

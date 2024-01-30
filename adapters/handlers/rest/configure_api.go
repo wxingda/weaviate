@@ -277,6 +277,7 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 		RPCPort:           appState.ServerConfig.Config.Raft.InternalRPCPort,
 		BootstrapExpect:   appState.ServerConfig.Config.Raft.BootstrapExpect,
 		HeartbeatTimeout:  appState.ServerConfig.Config.Raft.HeartbeatTimeout,
+		RecoveryTimeout:   appState.ServerConfig.Config.Raft.RecoveryTimeout,
 		ElectionTimeout:   appState.ServerConfig.Config.Raft.ElectionTimeout,
 		SnapshotInterval:  appState.ServerConfig.Config.Raft.SnapshotInterval,
 		SnapshotThreshold: appState.ServerConfig.Config.Raft.SnapshotThreshold,
@@ -294,15 +295,9 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 		}
 	}
 
-	fsm := schemav2.New(rConfig)
-	appState.MetaStore = &fsm
-	schemaReader := fsm.SchemaReader()
-	executor, err := schema.NewExecutor(migrator, schemaReader, appState.Logger)
-	if err != nil {
-		appState.Logger.Errorf("could not init executor %v:", err)
-		os.Exit(1)
-	}
-	fsm.SetDB(executor)
+	appState.CloudService = cloud.New(rConfig, appState.Cluster)
+	executor := schema.NewExecutor(migrator, appState.CloudService.SchemaReader(), appState.Logger)
+
 	schemaManager, err := schemaUC.NewManager(migrator,
 		appState.MetaStore,
 		schemaReader,
