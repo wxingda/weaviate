@@ -48,8 +48,6 @@ func (a *Aggregator) bm25Objects(ctx context.Context, kw *searchparams.KeywordRa
 	}
 	cfg := inverted.ConfigFromModel(class.InvertedIndexConfig)
 
-	kw.ChooseSearchableProperties(class)
-
 	objs, dists, err := inverted.NewBM25Searcher(cfg.BM25, a.store, a.getSchema.ReadOnlyClass,
 		propertyspecific.Indices{}, a.classSearcher,
 		a.GetPropertyLengthTracker(), a.logger, a.shardVersion,
