@@ -469,6 +469,29 @@ func eventualReplicaCRUD(t *testing.T) {
 	})
 }
 
+func restartNode1(ctx context.Context, t *testing.T, compose *docker.DockerCompose) {
+	// since node1 is the gossip "leader", node 2 must be stopped and restarted
+	// after node1 to re-facilitate internode communication
+	eg := errgroup.Group{}
+	eg.Go(func() error {
+		require.Nil(t, compose.StartAt(ctx, 1))
+		return nil
+	})
+	eg.Go(func() error { // restart node 2
+		time.Sleep(3 * time.Second) // wait for member list initialization
+		stopNodeAt(ctx, t, compose, 2)
+		require.Nil(t, compose.StartAt(ctx, 2))
+		return nil
+	})
+	eg.Wait()
+	<-time.After(3 * time.Second) // wait for initialization
+}
+
+func stopNode(ctx context.Context, t *testing.T, compose *docker.DockerCompose, container string) {
+	require.Nil(t, compose.Stop(ctx, container, nil))
+	<-time.After(1 * time.Second) // give time for shutdown
+}
+
 func stopNodeAt(ctx context.Context, t *testing.T, compose *docker.DockerCompose, index int) {
 	<-time.After(1 * time.Second)
 	require.Nil(t, compose.StopAt(ctx, index, nil))

@@ -136,6 +136,7 @@ func (m *executor) UpdateTenants(class string, req *cluster.UpdateTenantsRequest
 	if err != nil {
 		m.logger.WithField("action", "update_tenants").
 			WithField("class", class).Error(err)
+		return err
 	}
 
 	commit(true) // commit update of tenants

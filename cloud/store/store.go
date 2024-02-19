@@ -104,11 +104,11 @@ type Store struct {
 	applyTimeout      time.Duration
 	snapshotThreshold uint64
 
-	nodeID string
-	host   string
-	schema *schema
-	db     DB
-	parser Parser
+	nodeID   string
+	host     string
+	db       *localDB
+	log      *slog.Logger
+	logLevel string
 
 	bootstrapped atomic.Bool
 
@@ -131,7 +131,7 @@ func New(cfg Config, cluster cluster.Reader) Store {
 		nodeID:            cfg.NodeID,
 		host:              cfg.Host,
 		cluster:           cluster,
-		db:                localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser},
+		db:                &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser},
 		log:               cfg.Logger,
 		logLevel:          cfg.LogLevel,
 	}
@@ -229,7 +229,15 @@ func (st *Store) RestoreClass(cls *models.Class, ss *sharding.State) error {
 			"snapshot_index", snapshotIndex(snapshotStore),
 			"last_applied_log_index", st.initialLastAppliedIndex)
 
-		if err := raft.RecoverCluster(st.raftConfig(), st, logCache, st.logStore, snapshotStore, st.transport, raft.Configuration{
+		// FSM passed to RecoverCluster has to be temporary one
+		// because it will be left in state shouldn't be used by the application.
+		if err := raft.RecoverCluster(st.raftConfig(), &Store{
+			nodeID:   st.nodeID,
+			host:     st.host,
+			db:       st.db,
+			log:      st.log,
+			logLevel: st.logLevel,
+		}, logCache, st.logStore, snapshotStore, st.transport, raft.Configuration{
 			Servers: servers,
 		}); err != nil {
 			return fmt.Errorf("raft recovery failed: %w", err)
