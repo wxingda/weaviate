@@ -24,6 +24,8 @@ import (
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
+	schemaConfig "github.com/weaviate/weaviate/entities/schema/config"
+	"github.com/weaviate/weaviate/entities/vectorindex"
 	"github.com/weaviate/weaviate/usecases/config"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 	"github.com/weaviate/weaviate/usecases/replica"
@@ -221,22 +223,22 @@ func (m *Handler) UpdateClass(ctx context.Context, principal *models.Principal,
 	return m.metaWriter.UpdateClass(updated, nil)
 }
 
-func (m *Manager) setClassDefaults(class *models.Class) {
+func (h *Handler) setClassDefaults(class *models.Class) {
 	// set only when no target vectors configured
 	if !hasTargetVectors(class) {
 		if class.Vectorizer == "" {
-			class.Vectorizer = m.config.DefaultVectorizerModule
+			class.Vectorizer = h.config.DefaultVectorizerModule
 		}
 
 		if class.VectorIndexType == "" {
 			class.VectorIndexType = "hnsw"
 		}
 
-		if m.config.DefaultVectorDistanceMetric != "" {
+		if h.config.DefaultVectorDistanceMetric != "" {
 			if class.VectorIndexConfig == nil {
-				class.VectorIndexConfig = map[string]interface{}{"distance": m.config.DefaultVectorDistanceMetric}
+				class.VectorIndexConfig = map[string]interface{}{"distance": h.config.DefaultVectorDistanceMetric}
 			} else if class.VectorIndexConfig.(map[string]interface{})["distance"] == nil {
-				class.VectorIndexConfig.(map[string]interface{})["distance"] = m.config.DefaultVectorDistanceMetric
+				class.VectorIndexConfig.(map[string]interface{})["distance"] = h.config.DefaultVectorDistanceMetric
 			}
 		}
 	}
@@ -814,14 +816,14 @@ func validateVectorIndexConfigImmutableFields(initial, updated *models.Class) er
 	}...)
 }
 
-func asVectorIndexConfigs(c *models.Class) map[string]schema.VectorIndexConfig {
+func asVectorIndexConfigs(c *models.Class) map[string]schemaConfig.VectorIndexConfig {
 	if c.VectorConfig == nil {
 		return nil
 	}
 
-	cfgs := map[string]schema.VectorIndexConfig{}
+	cfgs := map[string]schemaConfig.VectorIndexConfig{}
 	for vecName := range c.VectorConfig {
-		cfgs[vecName] = c.VectorConfig[vecName].VectorIndexConfig.(schema.VectorIndexConfig)
+		cfgs[vecName] = c.VectorConfig[vecName].VectorIndexConfig.(schemaConfig.VectorIndexConfig)
 	}
 	return cfgs
 }

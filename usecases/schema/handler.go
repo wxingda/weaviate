@@ -49,6 +49,13 @@ type metaReader interface {
 	ShardOwner(class, shard string) (string, error)
 	TenantShard(class, tenant string) (string, string)
 	Read(class string, reader func(*models.Class, *sharding.State) error) error
+	GetShardsStatus(class string) (models.ShardStatusList, error)
+}
+
+type validator interface {
+	ValidateVectorIndexConfigUpdate(old, updated schemaConfig.VectorIndexConfig) error
+	ValidateInvertedIndexConfigUpdate(old, updated *models.InvertedIndexConfig) error
+	ValidateVectorIndexConfigsUpdate(old, updated map[string]schemaConfig.VectorIndexConfig) error
 }
 
 // The handler manages API requests for manipulating class schemas.

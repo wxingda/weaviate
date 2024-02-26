@@ -692,15 +692,6 @@ func (e *Explorer) crossClassVectorFromModules(ctx context.Context,
 	return nil, "", errors.New("no modules defined")
 }
 
-func (e *Explorer) GetSchema() schema.Schema {
-	return e.schemaGetter.GetSchemaSkipAuth()
-}
-
-func (e *Explorer) GetClassByName(className string) *models.Class {
-	s := e.GetSchema()
-	return s.GetClass(string(schema.ClassName(className)))
-}
-
 func (e *Explorer) checkCertaintyCompatibility(params dto.GetParams) error {
 	class := e.schemaGetter.ReadOnlyClass(params.ClassName)
 	if class == nil {

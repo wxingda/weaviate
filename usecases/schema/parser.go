@@ -17,7 +17,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
-	"github.com/weaviate/weaviate/usecases/sharding"
+	schemaConfig "github.com/weaviate/weaviate/entities/schema/config"
+	shardingConfig "github.com/weaviate/weaviate/usecases/sharding/config"
 )
 
 type Parser struct {
@@ -92,7 +93,7 @@ func (m *Parser) parseTargetVectorsVectorIndexConfig(class *models.Class) error 
 
 func (m *Parser) parseGivenVectorIndexConfig(vectorIndexType string,
 	vectorIndexConfig interface{},
-) (schema.VectorIndexConfig, error) {
+) (schemaConfig.VectorIndexConfig, error) {
 	if vectorIndexType != "hnsw" && vectorIndexType != "flat" {
 		return nil, errors.Errorf(
 			"parse vector index config: unsupported vector index type: %q",
@@ -104,6 +105,67 @@ func (m *Parser) parseGivenVectorIndexConfig(vectorIndexType string,
 		return nil, errors.Wrap(err, "parse vector index config")
 	}
 	return parsed, nil
+}
+
+// ParseClassUpdate parses a class after unmarshaling by setting concrete types for the fields
+func (p *Parser) ParseClassUpdate(class, update *models.Class) (*models.Class, error) {
+	if err := p.ParseClass(update); err != nil {
+		return nil, err
+	}
+	mtEnabled, err := validateUpdatingMT(class, update)
+	if err != nil {
+		return nil, err
+	}
+
+	if class.ReplicationConfig.Factor != update.ReplicationConfig.Factor {
+		return nil, fmt.Errorf("updating replication factor is not supported yet")
+	}
+
+	if err := validateImmutableFields(class, update); err != nil {
+		return nil, err
+	}
+
+	// run target vectors validation first, as it will reject classes
+	// where legacy vector was changed to target vectors and vice versa
+	if err := validateVectorConfigsParityAndImmutables(class, update); err != nil {
+		return nil, err
+	}
+
+	if err := validateVectorIndexConfigImmutableFields(class, update); err != nil {
+		return nil, err
+	}
+
+	if hasTargetVectors(update) {
+		if err := p.validator.ValidateVectorIndexConfigsUpdate(asVectorIndexConfigs(class), asVectorIndexConfigs(update)); err != nil {
+			return nil, err
+		}
+	} else {
+		vIdxConfig, ok1 := class.VectorIndexConfig.(schemaConfig.VectorIndexConfig)
+		vIdxConfigU, ok2 := update.VectorIndexConfig.(schemaConfig.VectorIndexConfig)
+		if !ok1 || !ok2 {
+			return nil, fmt.Errorf("vector index config wrong type: current=%t new=%t", ok1, ok2)
+		}
+		if err := p.validator.ValidateVectorIndexConfigUpdate(vIdxConfig, vIdxConfigU); err != nil {
+			return nil, fmt.Errorf("validate vector index config: %w", err)
+		}
+	}
+
+	if err := validateShardingConfig(class, update, mtEnabled); err != nil {
+		return nil, fmt.Errorf("validate sharding config: %w", err)
+	}
+
+	if !reflect.DeepEqual(class.Properties, update.Properties) {
+		return nil, errors.Errorf(
+			"properties cannot be updated through updating the class. Use the add " +
+				"property feature (e.g. \"POST /v1/schema/{className}/properties\") " +
+				"to add additional properties")
+	}
+
+	if err := p.validator.ValidateInvertedIndexConfigUpdate(class.InvertedIndexConfig, update.InvertedIndexConfig); err != nil {
+		return nil, fmt.Errorf("inverted index config: %w", err)
+	}
+
+	return update, nil
 }
 
 func hasTargetVectors(class *models.Class) bool {
