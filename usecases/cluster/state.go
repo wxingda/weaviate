@@ -22,11 +22,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Reader interface {
-	AllHostnames() []string
-	Alive(ID string) bool
-}
-
 type State struct {
 	config Config
 	// that lock to serialize access to memberlist
@@ -242,8 +237,6 @@ func (s *State) NodeHostname(nodeName string) (string, bool) {
 
 // NodeAddress is used to resolve the node name into an ip address without the port
 func (s *State) NodeAddress(id string) string {
-	s.listLock.RLock()
-	defer s.listLock.RUnlock()
 	for _, mem := range s.list.Members() {
 		if mem.Name == id {
 			return mem.Addr.String()

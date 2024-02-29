@@ -876,10 +876,11 @@ func NewMockStore(t *testing.T, nodeID string, raftPort int) MockStore {
 			SnapshotThreshold: 125,
 			DB:                indexer,
 			Parser:            parser,
+			AddrResolver:      &MockAddressResolver{},
 			Logger:            logger.Logger,
 		},
 	}
-	s := New(ms.cfg, NewMockCluster(nil))
+	s := New(ms.cfg)
 	ms.store = &s
 	return ms
 }

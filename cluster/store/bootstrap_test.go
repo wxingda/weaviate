@@ -92,22 +92,19 @@ func TestBootStrapper(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			m := &MockJoiner{}
-			b := NewBootstrapper(m, "RID", "ADDR", &MockAddressResolver{func(id string) string { return id }}, test.isReady)
-			b.retryPeriod = time.Millisecond
-			b.jitter = time.Millisecond
-			test.doBefore(m)
-			ctx, cancel := context.WithTimeout(ctx, time.Millisecond*100)
-			err := b.Do(ctx, test.servers, NewMockLogger(t).Logger, test.voter, make(chan struct{}))
-			cancel()
-			if test.success && err != nil {
-				t.Errorf("%s: %v", test.name, err)
-			} else if !test.success && err == nil {
-				t.Errorf("%s: test must fail", test.name)
-			}
-		})
+		m := &MockJoiner{}
+		b := NewBootstrapper(m, "RID", "ADDR", &MockAddressResolver{func(id string) string { return id }})
+		b.retryPeriod = time.Millisecond
+		b.jitter = time.Millisecond
+		test.doBefore(m)
+		ctx, cancel := context.WithTimeout(ctx, time.Millisecond*100)
+		err := b.Do(ctx, test.servers, NewMockSLog(t).Logger, test.voter)
+		cancel()
+		if test.success && err != nil {
+			t.Errorf("%s: %v", test.name, err)
+		} else if !test.success && err == nil {
+			t.Errorf("%s: test must fail", test.name)
+		}
 	}
 }
 

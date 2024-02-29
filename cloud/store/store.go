@@ -22,7 +22,6 @@ import (
 	"github.com/hashicorp/raft"
 	command "github.com/weaviate/weaviate/cloud/proto/cluster"
 	"github.com/weaviate/weaviate/entities/models"
-	"github.com/weaviate/weaviate/usecases/cluster"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,8 +35,6 @@ const (
 	tcpTimeout = 10 * time.Second
 
 	raftDBName = "raft.db"
-
-	peersFileName = "peers.json"
 
 	// logCacheCapacity is the maximum number of logs to cache in-memory.
 	// This is used to reduce disk I/O for the recently committed entries.
@@ -73,11 +70,15 @@ type Parser interface {
 }
 
 type Config struct {
-	WorkDir         string // raft working directory
-	NodeID          string
-	Host            string
-	RaftPort        int
-	BootstrapExpect int
+	WorkDir  string // raft working directory
+	NodeID   string
+	Host     string
+	RaftPort int
+	RPCPort  int
+
+	// ServerName2PortMap maps server names to port numbers
+	ServerName2PortMap map[string]int
+	BootstrapExpect    int
 
 	HeartbeatTimeout  time.Duration
 	ElectionTimeout   time.Duration
@@ -85,14 +86,18 @@ type Config struct {
 	SnapshotInterval  time.Duration
 	SnapshotThreshold uint64
 
-	DB     DB
-	Parser Parser
+	DB           Indexer
+	Parser       Parser
+	AddrResolver addressResolver
+	Logger       *slog.Logger
+	LogLevel     string
+	Voter        bool
+	// IsLocalHost only required when running Weaviate from the console in localhost
+	IsLocalHost bool
 }
 
 type Store struct {
-	raft    *raft.Raft
-	cluster cluster.Reader
-
+	raft              *raft.Raft
 	open              atomic.Bool
 	raftDir           string
 	raftPort          int
@@ -111,12 +116,15 @@ type Store struct {
 	logLevel string
 
 	bootstrapped atomic.Bool
+	logStore     *raftbolt.BoltStore
+	addResolver  *addrResolver
+	transport    *raft.NetworkTransport
 
 	mutex      sync.Mutex
 	candidates map[string]string
 }
 
-func New(cfg Config, cluster cluster.Reader) Store {
+func New(cfg Config) Store {
 	return Store{
 		raftDir:           cfg.WorkDir,
 		raftPort:          cfg.RaftPort,
@@ -130,7 +138,7 @@ func New(cfg Config, cluster cluster.Reader) Store {
 		applyTimeout:      time.Second * 20,
 		nodeID:            cfg.NodeID,
 		host:              cfg.Host,
-		cluster:           cluster,
+		addResolver:       newAddrResolver(&cfg),
 		db:                &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser},
 		log:               cfg.Logger,
 		logLevel:          cfg.LogLevel,
@@ -141,12 +149,6 @@ func (f *Store) SetDB(db DB) {
 	f.db = db
 	f.schema.shardReader = db
 }
-
-	if err := st.genPeersFileFromBolt(
-		filepath.Join(st.raftDir, raftDBName),
-		filepath.Join(st.raftDir, peersFileName)); err != nil {
-		return err
-	}
 
 	if err = os.MkdirAll(st.raftDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", st.raftDir, err)
@@ -201,7 +203,7 @@ func (st *Store) RestoreClass(cls *models.Class, ss *sharding.State) error {
 		return fmt.Errorf("net.ResolveTCPAddr address=%v: %w", address, err)
 	}
 
-	st.transport, err = raft.NewTCPTransport(address, tcpAddr, tcpMaxPool, tcpTimeout, os.Stdout)
+	st.transport, err = st.addResolver.NewTCPTransport(address, tcpAddr, tcpMaxPool, tcpTimeout)
 	if err != nil {
 		return fmt.Errorf("raft.NewTCPTransport  address=%v tcpAddress=%v maxPool=%v timeOut=%v: %w", address, tcpAddr, tcpMaxPool, tcpTimeout, err)
 	}
@@ -216,43 +218,6 @@ func (st *Store) RestoreClass(cls *models.Class, ss *sharding.State) error {
 
 	if st.initialLastAppliedIndex == snapshotIndex(snapshotStore) {
 		st.loadDatabase(ctx)
-	}
-
-	existedConfig, err := st.configViaPeers(filepath.Join(st.raftDir, peersFileName))
-	if err != nil {
-		return err
-	}
-
-	if servers, recover := st.recoverable(existedConfig.Servers); recover {
-		st.log.Info("recovery: start recovery with",
-			"peers", servers,
-			"snapshot_index", snapshotIndex(snapshotStore),
-			"last_applied_log_index", st.initialLastAppliedIndex)
-
-		// FSM passed to RecoverCluster has to be temporary one
-		// because it will be left in state shouldn't be used by the application.
-		if err := raft.RecoverCluster(st.raftConfig(), &Store{
-			nodeID:   st.nodeID,
-			host:     st.host,
-			db:       st.db,
-			log:      st.log,
-			logLevel: st.logLevel,
-		}, logCache, st.logStore, snapshotStore, st.transport, raft.Configuration{
-			Servers: servers,
-		}); err != nil {
-			return fmt.Errorf("raft recovery failed: %w", err)
-		}
-
-		// load the database if <= because RecoverCluster() will implicitly
-		// commits all entries in the previous Raft log before starting
-		if st.initialLastAppliedIndex <= snapshotIndex(snapshotStore) {
-			st.loadDatabase(ctx)
-		}
-
-		st.log.Info("recovery: succeeded from previous configuration",
-			"peers", servers,
-			"snapshot_index", snapshotIndex(snapshotStore),
-			"last_applied_log_index", st.initialLastAppliedIndex)
 	}
 
 	// raft node
@@ -375,8 +340,119 @@ func (st *Store) executeCommand(cmd *command.Command) error {
 	return nil
 }
 
-func (f *Store) SchemaReader() *schema {
-	return f.schema
+// Join adds the given peer to the cluster.
+// This operation must be executed on the leader, otherwise, it will fail with ErrNotLeader.
+// If the cluster has not been opened yet, it will return ErrNotOpen.
+func (st *Store) Join(id, addr string, voter bool) error {
+	if !st.open.Load() {
+		return ErrNotOpen
+	}
+	if st.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+
+	rID, rAddr := raft.ServerID(id), raft.ServerAddress(addr)
+
+	if !voter {
+		return st.assertFuture(st.raft.AddNonvoter(rID, rAddr, 0, 0))
+	}
+	return st.assertFuture(st.raft.AddVoter(rID, rAddr, 0, 0))
+}
+
+// Remove removes this peer from the cluster
+func (st *Store) Remove(id string) error {
+	if !st.open.Load() {
+		return ErrNotOpen
+	}
+	if st.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+	return st.assertFuture(st.raft.RemoveServer(raft.ServerID(id), 0, 0))
+}
+
+// Notify signals this Store that a node is ready for bootstrapping at the specified address.
+// Bootstrapping will be initiated once the number of known nodes reaches the expected level,
+// which includes this node.
+
+func (st *Store) Notify(id, addr string) (err error) {
+	if !st.open.Load() {
+		return ErrNotOpen
+	}
+	// peer is not voter or already bootstrapped or belong to an existing cluster
+	if st.bootstrapExpect == 0 || st.bootstrapped.Load() || st.Leader() != "" {
+		return nil
+	}
+
+	st.mutex.Lock()
+	defer st.mutex.Unlock()
+
+	st.candidates[id] = addr
+	if len(st.candidates) < st.bootstrapExpect {
+		st.log.Debug("number of candidates", "expect", st.bootstrapExpect, "got", st.candidates)
+		return nil
+	}
+	candidates := make([]raft.Server, 0, len(st.candidates))
+	i := 0
+	for id, addr := range st.candidates {
+		candidates = append(candidates, raft.Server{
+			Suffrage: raft.Voter,
+			ID:       raft.ServerID(id),
+			Address:  raft.ServerAddress(addr),
+		})
+		delete(st.candidates, id)
+		i++
+	}
+
+	st.log.Info("starting cluster bootstrapping", "candidates", candidates)
+
+	fut := st.raft.BootstrapCluster(raft.Configuration{Servers: candidates})
+	if err := fut.Error(); err != nil {
+		st.log.Error("bootstrapping cluster: " + err.Error())
+
+		return err
+	}
+	st.bootstrapped.Store(true)
+	return nil
+}
+
+func (st *Store) assertFuture(fut raft.IndexFuture) error {
+	if err := fut.Error(); err != nil && errors.Is(err, raft.ErrNotLeader) {
+		return ErrNotLeader
+	} else {
+		return err
+	}
+}
+
+func (st *Store) raftConfig() *raft.Config {
+	cfg := raft.DefaultConfig()
+	if st.heartbeatTimeout > 0 {
+		cfg.HeartbeatTimeout = st.heartbeatTimeout
+	}
+	if st.electionTimeout > 0 {
+		cfg.ElectionTimeout = st.electionTimeout
+	}
+	if st.snapshotInterval > 0 {
+		cfg.SnapshotInterval = st.snapshotInterval
+	}
+	if st.snapshotThreshold > 0 {
+		cfg.SnapshotThreshold = st.snapshotThreshold
+	}
+	cfg.LocalID = raft.ServerID(st.nodeID)
+	cfg.LogLevel = st.logLevel
+	return cfg
+}
+
+func (st *Store) loadDatabase(ctx context.Context) {
+	if st.dbLoaded.Load() {
+		return
+	}
+	if err := st.db.Load(ctx, st.nodeID); err != nil {
+		st.log.Error("cannot restore database: " + err.Error())
+		panic("error restoring database")
+	}
+
+	st.dbLoaded.Store(true)
+	st.log.Info("database has been successfully loaded")
 }
 
 type Response struct {
