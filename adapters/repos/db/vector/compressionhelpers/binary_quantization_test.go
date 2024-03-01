@@ -27,7 +27,7 @@ import (
 func TestBinaryQuantizerRecall(t *testing.T) {
 	k := 10
 	distanceProvider := distancer.NewCosineDistanceProvider()
-	vectors, queryVecs := testinghelpers.RandomVecs(10_000, 100, 1536)
+	vectors, queryVecs := testinghelpers.RandomVecs(10_000, 100, 4608)
 	compressionhelpers.Concurrently(uint64(len(vectors)), func(i uint64) {
 		vectors[i] = distancer.Normalize(vectors[i])
 	})
@@ -41,16 +41,35 @@ func TestBinaryQuantizerRecall(t *testing.T) {
 		codes[i] = bq.Encode(vectors[i])
 	})
 	neighbors := make([][]uint64, len(queryVecs))
-	compressionhelpers.Concurrently(uint64(len(queryVecs)), func(i uint64) {
-		neighbors[i], _ = testinghelpers.BruteForce(vectors, queryVecs[i], k, func(f1, f2 []float32) float32 {
-			d, _, _ := distanceProvider.SingleDist(f1, f2)
-			return d
-		})
-	})
 	correctedK := 200
 	hits := uint64(0)
 	mutex := sync.Mutex{}
 	duration := time.Duration(0)
+	compressionhelpers.Concurrently(uint64(len(queryVecs)), func(i uint64) {
+		before := time.Now()
+		query := queryVecs[i]
+		heap := priorityqueue.NewMax[any](k)
+		for j := range vectors {
+			d, _, _ := distanceProvider.SingleDist(vectors[j], query)
+			if heap.Len() < k || heap.Top().Dist > d {
+				if heap.Len() == k {
+					heap.Pop()
+				}
+				heap.Insert(uint64(j), d)
+			}
+		}
+		neighbors[i] = make([]uint64, k)
+		for j := range neighbors[i] {
+			neighbors[i][j] = heap.Pop().ID
+		}
+		mutex.Lock()
+		duration += time.Since(before)
+		mutex.Unlock()
+	})
+	latency := float32(duration.Microseconds()) / float32(len(queryVecs))
+	fmt.Println(latency)
+	duration = time.Duration(0)
+
 	compressionhelpers.Concurrently(uint64(len(queryVecs)), func(i uint64) {
 		before := time.Now()
 		query := bq.Encode(queryVecs[i])
@@ -74,9 +93,9 @@ func TestBinaryQuantizerRecall(t *testing.T) {
 		mutex.Unlock()
 	})
 	recall := float32(hits) / float32(k*len(queryVecs))
-	latency := float32(duration.Microseconds()) / float32(len(queryVecs))
+	latency = float32(duration.Microseconds()) / float32(len(queryVecs))
 	fmt.Println(recall, latency)
-	assert.True(t, recall > 0.7)
+	assert.True(t, recall > 0.99)
 }
 
 func TestBinaryQuantizerChecksSize(t *testing.T) {
