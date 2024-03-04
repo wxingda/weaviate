@@ -244,12 +244,12 @@ func (m *Handler) GetTenants(ctx context.Context, principal *models.Principal, c
 	return ts, m.metaReader.Read(class, f)
 }
 
-func (m *Handler) multiTenancy(class string) (store.ClassInfo, error) {
-	info := m.metaReader.ClassInfo(class)
+func (h *Handler) multiTenancy(class string) (store.ClassInfo, error) {
+	info := h.metaReader.ClassInfo(class)
 	if !info.Exists {
 		return info, fmt.Errorf("class %q: %w", class, ErrNotFound)
 	}
-	if !info.MultiTenancy {
+	if !info.MultiTenancy.Enabled {
 		return info, fmt.Errorf("multi-tenancy is not enabled for class %q", class)
 	}
 	return info, nil

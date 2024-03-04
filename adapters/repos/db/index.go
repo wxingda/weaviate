@@ -2152,19 +2152,11 @@ func (i *Index) findUUIDs(ctx context.Context,
 
 	results := make(map[string][]strfmt.UUID)
 	for _, shardName := range shardNames {
-		var shard ShardLike
-		var release func()
 
-		shard, release, err = i.getLocalShardNoShutdown(shardName)
-		if err == nil {
-			if shard != nil {
-				func() {
-					defer release()
-					results[shardName], err = shard.FindUUIDs(ctx, filters)
-				}()
-			} else {
-				results[shardName], err = i.remote.FindUUIDs(ctx, shardName, filters)
-			}
+		if shard := retryGetLocalShard(i, shardName); shard != nil {
+			results[shardName], err = shard.FindUUIDs(ctx, filters)
+		} else {
+			results[shardName], err = i.remote.FindUUIDs(ctx, shardName, filters)
 		}
 
 		if err != nil {
@@ -2321,4 +2313,17 @@ func convertToVectorIndexConfigs(configs map[string]models.VectorConfig) map[str
 		return vectorIndexConfigs
 	}
 	return nil
+}
+
+// retryGetLocalShard is a wrapper around getting localShard used
+// to handle eventual consistency.
+func retryGetLocalShard(i *Index, name string) ShardLike {
+	var sl ShardLike
+	backoff.Retry(func() error {
+		if sl = i.localShard(name); sl == nil {
+			return fmt.Errorf("does not exists")
+		}
+		return nil
+	}, utils.NewBackoff())
+	return sl
 }

@@ -196,12 +196,19 @@ type ClassInfo struct {
 	Tenants           int
 }
 
-func (f *schema) ClassInfo(class string) (ci ClassInfo) {
-	f.RLock()
-	defer f.RUnlock()
+func (s *schema) ClassInfo(class string) (ci ClassInfo) {
+	var i *metaClass
+	err := backoff.Retry(func() error {
+		s.RLock()
+		defer s.RUnlock()
 
-	i := f.Classes[class]
-	if i == nil {
+		i = s.Classes[class]
+		if i == nil {
+			return fmt.Errorf("class not found")
+		}
+		return nil
+	}, utils.NewBackoff())
+	if err != nil {
 		return
 	}
 	ci.Exists = true

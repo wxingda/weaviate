@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 
 	"github.com/go-openapi/strfmt"
-	"github.com/pkg/errors"
 	"github.com/weaviate/weaviate/entities/additional"
 	"github.com/weaviate/weaviate/entities/lsmkv"
 	"github.com/weaviate/weaviate/entities/multi"
@@ -153,8 +152,8 @@ func (db *DB) replicatedIndex(name string) (idx *Index, resp *replica.SimpleResp
 }
 
 func (i *Index) writableShard(name string) (ShardLike, *replica.SimpleResponse) {
-	localShard, err := i.getOrInitLocalShard(context.Background(), name)
-	if err != nil {
+	localShard := retryGetLocalShard(i, name)
+	if localShard == nil {
 		return nil, &replica.SimpleResponse{Errors: []replica.Error{
 			{Code: replica.StatusShardNotFound, Msg: name},
 		}}
@@ -216,17 +215,16 @@ func (i *Index) ReplicateReferences(ctx context.Context, shard, requestID string
 }
 
 func (i *Index) CommitReplication(shard, requestID string) interface{} {
-	localShard, err := i.getOrInitLocalShard(context.Background(), shard)
-	// TODO-RAFT no error response on error?
-	if err != nil {
+	localShard := retryGetLocalShard(i, shard)
+	if localShard == nil {
 		return nil
 	}
 	return localShard.commitReplication(context.Background(), requestID, &i.backupMutex)
 }
 
 func (i *Index) AbortReplication(shard, requestID string) interface{} {
-	localShard, err := i.getOrInitLocalShard(context.Background(), shard)
-	if err != nil {
+	localShard := retryGetLocalShard(i, shard)
+	if localShard == nil {
 		return replica.SimpleResponse{Errors: []replica.Error{
 			{Code: replica.StatusShardNotFound, Msg: shard},
 		}}
@@ -237,8 +235,8 @@ func (i *Index) AbortReplication(shard, requestID string) interface{} {
 func (i *Index) IncomingFilePutter(ctx context.Context, shardName,
 	filePath string,
 ) (io.WriteCloser, error) {
-	localShard, err := i.getOrInitLocalShard(context.Background(), shardName)
-	if err != nil {
+	localShard := retryGetLocalShard(i, shardName)
+	if localShard == nil {
 		return nil, fmt.Errorf("shard %q does not exist locally", shardName)
 	}
 
@@ -255,30 +253,9 @@ func (i *Index) IncomingCreateShard(ctx context.Context, className string, shard
 func (i *Index) IncomingReinitShard(ctx context.Context,
 	shardName string,
 ) error {
-	shard := func() ShardLike {
-		i.shardInUseLocks.Lock(shardName)
-		defer i.shardInUseLocks.Unlock(shardName)
-
-		return i.shards.Load(shardName)
-	}()
-
-	if shard != nil {
-		err := func() error {
-			i.shardCreateLocks.Lock(shardName)
-			defer i.shardCreateLocks.Unlock(shardName)
-
-			i.shards.LoadAndDelete(shardName)
-
-			if err := shard.Shutdown(ctx); err != nil {
-				if !errors.Is(err, errAlreadyShutdown) {
-					return err
-				}
-			}
-			return nil
-		}()
-		if err != nil {
-			return err
-		}
+	shard := retryGetLocalShard(i, shardName)
+	if shard == nil {
+		return fmt.Errorf("shard %q does not exist locally", shardName)
 	}
 
 	_, err := i.getOrInitLocalShard(ctx, shardName)
@@ -311,8 +288,8 @@ func (i *Index) OverwriteObjects(ctx context.Context,
 	shard string, updates []*objects.VObject,
 ) ([]replica.RepairResponse, error) {
 	result := make([]replica.RepairResponse, 0, len(updates)/2)
-	s, err := i.getOrInitLocalShard(ctx, shard)
-	if err != nil {
+	s := retryGetLocalShard(i, shard)
+	if s == nil {
 		return nil, fmt.Errorf("shard %q not found locally", shard)
 	}
 	for i, u := range updates {
@@ -378,8 +355,8 @@ func (i *Index) digestObjects(ctx context.Context,
 	shardName string, ids []strfmt.UUID,
 ) (result []replica.RepairResponse, err error) {
 	result = make([]replica.RepairResponse, len(ids))
-	s, err := i.getOrInitLocalShard(ctx, shardName)
-	if err != nil {
+	s := retryGetLocalShard(i, shardName)
+	if s == nil {
 		return nil, fmt.Errorf("shard %q not found locally", shardName)
 	}
 
@@ -427,8 +404,8 @@ func (i *Index) IncomingDigestObjects(ctx context.Context,
 func (i *Index) FetchObject(ctx context.Context,
 	shardName string, id strfmt.UUID,
 ) (objects.Replica, error) {
-	shard, err := i.getOrInitLocalShard(ctx, shardName)
-	if err != nil {
+	shard := retryGetLocalShard(i, shardName)
+	if shard == nil {
 		return objects.Replica{}, fmt.Errorf("shard %q does not exist locally", shardName)
 	}
 
@@ -457,8 +434,8 @@ func (i *Index) FetchObject(ctx context.Context,
 func (i *Index) FetchObjects(ctx context.Context,
 	shardName string, ids []strfmt.UUID,
 ) ([]objects.Replica, error) {
-	shard, err := i.getOrInitLocalShard(ctx, shardName)
-	if err != nil {
+	shard := retryGetLocalShard(i, shardName)
+	if shard == nil {
 		return nil, fmt.Errorf("shard %q does not exist locally", shardName)
 	}
 
