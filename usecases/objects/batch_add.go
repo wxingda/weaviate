@@ -21,7 +21,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
-	cloud_utils "github.com/weaviate/weaviate/cloud/utils"
 	"github.com/weaviate/weaviate/entities/additional"
 	"github.com/weaviate/weaviate/entities/classcache"
 	"github.com/weaviate/weaviate/entities/models"
@@ -186,31 +185,34 @@ func (b *BatchManager) validateAndGetVector(ctx context.Context, principal *mode
 		object.LastUpdateTimeUnix = now
 	}
 
-	// Batch together the GetClass and the validation function as the validation function will create/update the class
-	// if it already exists to match the object.
-	err = backoff.Retry(func() error {
-		class, err := b.schemaManager.GetClass(ctx, principal, object.Class)
-		if err != nil {
-			return err
-		}
-
-		if class == nil {
-			return fmt.Errorf("class '%s' not present in schema", object.Class)
-		}
-
-		err = validation.New(b.vectorRepo.Exists, b.config, repl).Object(ctx, class, object, nil)
-		if err != nil {
-			return err
-		}
-		// update vector only if we passed validation
-		err = b.modulesProvider.UpdateVector(ctx, object, class, b.findObject, b.logger)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}, cloud_utils.NewBackoff())
+	class, err := b.schemaManager.GetClass(ctx, principal, object.Class)
 	ec.Add(err)
 
-	return batchObjects, maxSchemaVersion
+	if class == nil {
+		// TODO: reconsolidate returning that error from GetClass
+		ec.Add(fmt.Errorf("class '%s' not present in schema", object.Class))
+	} else {
+		ec.Add(validation.New(b.vectorRepo.Exists, b.config, repl).Object(ctx, class, object, nil))
+		ec.Add(b.modulesProvider.UpdateVector(ctx, object, class, b.findObject, b.logger))
+	}
+
+	*resultsC <- BatchObject{
+		UUID:          id,
+		Object:        object,
+		Err:           ec.ToError(),
+		OriginalIndex: originalIndex,
+	}
+}
+
+func objectsChanToSlice(c chan BatchObject) BatchObjects {
+	result := make([]BatchObject, len(c))
+	for object := range c {
+		result[object.OriginalIndex] = object
+	}
+
+	return result
+}
+
+func unixNow() int64 {
+	return time.Now().UnixNano() / int64(time.Millisecond)
 }
