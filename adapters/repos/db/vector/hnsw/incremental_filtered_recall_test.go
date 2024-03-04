@@ -102,7 +102,7 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		fmt.Println("Loading vectors...")
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
-		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-1M-5-2_0.json")
+		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-1M-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(indexFiltersJSON, &indexFilters)
 		require.Nil(t, err)
@@ -117,14 +117,14 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
 		fmt.Println("Loading vectors...")
-		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-1M-5-2_0.json")
+		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-1M-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(queryFiltersJSON, &queryFilters)
 		/* MERGE QUERY VECTORS WITH FILTERS */
 		queryVectorsWithFilters := mergeData(queryVectors, queryFilters)
 		/* LOAD GROUND TRUTHS */
 		fmt.Println("Loading vectors...")
-		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered-recall-truths-1M-5-2_0.json")
+		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered-recall-truths-1M-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(truthsJSON, &truths)
 		require.Nil(t, err)
@@ -167,13 +167,14 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 				defer wg.Done()
 				for i, vec := range myJobs {
 					originalIndex := (i * workerCount) + workerID
-					if originalIndex == 100_000 {
+					if originalIndex%99_999 == 0 && originalIndex != 0 {
 						mutex.Lock()
 						fmt.Println("Threads stopped here.")
 						if hnsw_efg {
 							// convert jobsForWorker from map[int][]vecWithFilters to map[int][]*vertex
 							jobsForGraphRepairWorker := make([][]*vertex, workerCount)
-							for idx, node := range vectorIndex.nodes {
+							repairStart := originalIndex - 99_999
+							for idx, node := range vectorIndex.nodes[repairStart:originalIndex] {
 								if node == nil {
 									fmt.Printf("Nil node at idx %d! \n", idx)
 								} else {
@@ -183,7 +184,7 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 							}
 							repairGraph(vectorIndex, jobsForGraphRepairWorker, IDsToFilter, filterToIDs, IDsToVector)
 						}
-						evaluatePerformance(queryVectorsWithFilters, hnsw_efg, vectorIndex, filterToIDs, truths)
+						//evaluatePerformance(queryVectorsWithFilters, hnsw_efg, vectorIndex, filterToIDs, truths)
 						mutex.Unlock()
 					}
 					fmt.Println(originalIndex)
@@ -212,6 +213,7 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 		}
 		wg.Wait()
 		fmt.Printf("Importing took %s \n", time.Since(before))
+		evaluatePerformance(queryVectorsWithFilters, hnsw_efg, vectorIndex, filterToIDs, truths)
 		/* ADDING FILTER SHARING NEIGHBORS AFTER THE GRAPH HAS BEEN BUILT */
 		// Turn off Interventions here to record original Latency / Recall
 		if hnsw_efg {
@@ -290,7 +292,7 @@ func repairGraph(vectorIndex *hnsw, jobsForGraphRepairWorker [][]*vertex, IDsToF
 	mutexForGraphRepair := &sync.Mutex{}
 
 	addEdgesTimer := time.Now()
-	minorityFilter := map[int]int{0: 4}
+	minorityFilter := map[int]int{0: 1} // Change this for multi-label
 	for workerID, jobs := range jobsForGraphRepairWorker {
 		wgForGraphRepair.Add(1)
 		go func(workerID int, myJobs []*vertex) {
@@ -312,7 +314,7 @@ func repairGraph(vectorIndex *hnsw, jobsForGraphRepairWorker [][]*vertex, IDsToF
 					matchCount := countTargetFilterEdges(node, nodeAllowList)
 					fmt.Printf("\nAFTER INTERVENTION: NodeId: %d, now has %f filter sharign neighbors.", node.id, matchCount)
 				}
-				if val, ok := nodeFilter[0]; !ok || val != 4 {
+				if val, ok := nodeFilter[0]; !ok || val != 1 {
 					// Majority node, connect to minority nodes
 					// Before Intervention Log
 					minorityAllowList := buildAllowList(minorityFilter, filterToIDs)
@@ -340,7 +342,8 @@ func evaluatePerformance(queryVectorsWithFilters []vecWithFilters, hnsw_efg bool
 	var relevant_retrieved int
 	RecallPerFilter := make(map[int]map[int][]float32)
 	LatenciesPerFilter := make(map[int]map[int][]float32)
-	allFilters := []map[int]int{{0: 0}, {0: 1}, {0: 2}, {0: 3}, {0: 4}}
+	allFilters := []map[int]int{{0: 0}, {0: 1}}
+	//allFilters := []map[int]int{{0: 0}, {0: 1}, {0: 2}, {0: 3}, {0: 4}}
 	for _, filterMap := range allFilters {
 		for outerFilter, innerFilter := range filterMap {
 			if _, exists := LatenciesPerFilter[outerFilter]; !exists {
@@ -361,12 +364,18 @@ func evaluatePerformance(queryVectorsWithFilters []vecWithFilters, hnsw_efg bool
 		}
 		queryAllowList := helpers.NewAllowList(allowListIDs...)
 		queryStart := time.Now()
+		/* Multi-Label
 		if hnsw_efg {
 			if queryFilters[0] == 4 {
 				results, _, _ = vectorIndex.FilteredSearchWithExtendedGraph(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 			} else {
 				results, _, _ = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 			}
+		} */
+		if hnsw_efg {
+			results, _, _ = vectorIndex.FilteredSearchWithExtendedGraph(queryVectorsWithFilters[i].Vector, k, queryAllowList)
+		} else {
+			results, _, _ = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 		}
 		local_latency := float32(time.Now().Sub(queryStart).Seconds())
 		relevant_retrieved = matchesInLists(truths[i].Truths, results)
