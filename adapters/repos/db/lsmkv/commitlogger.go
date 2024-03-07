@@ -221,7 +221,7 @@ func (cl *commitLogger) unpause() {
 }
 
 func (cl *commitLogger) delete() error {
-	return os.Remove(cl.path)
+	return os.RemoveAll(cl.path)
 }
 
 func (cl *commitLogger) flushBuffers() error {
