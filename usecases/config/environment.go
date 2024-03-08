@@ -26,19 +26,6 @@ import (
 )
 
 const (
-	DefaultQueryMaximumResults            = int64(10000)
-	DefaultQueryNestedCrossReferenceLimit = int64(100000)
-)
-
-const (
-	DefaultPersistenceFlushIdleMemtablesAfter = 60
-	DefaultPersistenceMemtablesMaxSize        = 200
-	DefaultPersistenceMemtablesMinDuration    = 15
-	DefaultPersistenceMemtablesMaxDuration    = 45
-	DefaultMaxConcurrentGetRequests           = 0
-	DefaultGRPCPort                           = 50051
-	DefaultMinimumReplicationFactor           = 1
-
 	DefaultRaftPort             = 8300
 	DefaultRaftInternalPort     = 8301
 	DefaultRaftGRPCMaxSize      = 1024 * 1024 * 1024

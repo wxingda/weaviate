@@ -80,6 +80,7 @@ func testAddObjectClassExplicitVectorizer(t *testing.T, handler *Handler, fakeMe
 func testAddObjectClassImplicitVectorizer(t *testing.T, handler *Handler, fakeMetaHandler *fakeMetaHandler) {
 	t.Parallel()
 	handler.config.DefaultVectorizerModule = config.VectorizerModuleText2VecContextionary
+	fakeMetaHandler.On("ReadOnlySchema").Return(models.Schema{})
 	class := &models.Class{
 		Class: "Car",
 		Properties: []*models.Property{{
@@ -183,6 +184,7 @@ func testCantAddSameClassTwice(t *testing.T, handler *Handler, fakeMetaHandler *
 		},
 	}
 	fakeMetaHandler.ExpectedCalls = fakeMetaHandler.ExpectedCalls[:0]
+	fakeMetaHandler.On("ReadOnlySchema").Return(models.Schema{Classes: []*models.Class{class}})
 	fakeMetaHandler.On("AddClass", class, mock.Anything).Return(ErrNotFound)
 
 	// Add it again

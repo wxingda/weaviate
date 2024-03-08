@@ -125,7 +125,7 @@ function main() {
     ./test/acceptance_with_python/run.sh
     echo_green "Python tests successful"
   fi
-
+  
   if $only_module; then
     mod=${only_module_value//--only-module-/}
     echo_green "Running module acceptance tests for $mod..."

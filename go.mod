@@ -51,11 +51,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.9.0
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/go-ego/gse v0.80.2
-	github.com/googleapis/gax-go/v2 v2.12.2
-	github.com/hashicorp/go-hclog v1.6.2
-	github.com/hashicorp/raft v1.5.0
-	github.com/hashicorp/raft-boltdb/v2 v2.2.2
-	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
+	github.com/googleapis/gax-go/v2 v2.12.1
 	github.com/hashicorp/raft v1.5.0
 	github.com/hashicorp/raft-boltdb/v2 v2.2.2
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -114,9 +110,6 @@ require (
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/fatih/color v1.13.0 // indirect
-	github.com/fatih/color v1.16.0 // indirect
-	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/analysis v0.21.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.19.6 // indirect
@@ -131,7 +124,6 @@ require (
 	github.com/hashicorp/go-hclog v1.6.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.0.0 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
-	github.com/hashicorp/go-msgpack/v2 v2.1.1 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-sockaddr v1.0.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.1 // indirect

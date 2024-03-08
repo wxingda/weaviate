@@ -433,9 +433,7 @@ func (m *Handler) validateProperty(
 	}
 
 	// Validate data type of property.
-	sch := m.getSchema()
-
-	propertyDataType, err := (&sch).FindPropertyDataTypeWithRefs(property.DataType,
+	propertyDataType, err := schema.FindPropertyDataTypeWithRefs(h.metaReader.ReadOnlyClass, property.DataType,
 		relaxCrossRefValidation, schema.ClassName(class.Class))
 	if err != nil {
 		return fmt.Errorf("property '%s': invalid dataType: %v", property.Name, err)
@@ -495,17 +493,13 @@ func (m *Handler) validateCanAddClass(
 	ctx context.Context, class *models.Class,
 	relaxCrossRefValidation bool,
 ) error {
-	if err := m.validateClassNameUniqueness(class.Class); err != nil {
-		return err
-	}
-
-	if err := m.validateClassName(ctx, class.Class); err != nil {
+	if err := h.validateClassName(class.Class); err != nil {
 		return err
 	}
 
 	existingPropertyNames := map[string]bool{}
 	for _, property := range class.Properties {
-		if err := m.validateProperty(property, class, existingPropertyNames, relaxCrossRefValidation); err != nil {
+		if err := h.validateProperty(property, class, existingPropertyNames, relaxCrossRefValidation); err != nil {
 			return err
 		}
 		existingPropertyNames[strings.ToLower(property.Name)] = true
