@@ -41,7 +41,9 @@ type Store struct {
 	// Prevent concurrent manipulations to the bucketsByNameMap, most notably
 	// when initializing buckets in parallel
 	bucketAccessLock sync.RWMutex
-	bucketByNameLock map[string]*sync.Mutex
+
+	bucketByNameLock  map[string]*sync.Mutex
+	bucketByNameMutex sync.Mutex
 }
 
 // New initializes a new [Store] based on the root dir. If state is present on
@@ -103,6 +105,30 @@ func (s *Store) bucketDir(bucketName string) string {
 	return path.Join(s.dir, bucketName)
 }
 
+func (s *Store) lockBucketName(bucketName string) {
+	s.bucketByNameMutex.Lock()
+	defer s.bucketByNameMutex.Unlock()
+
+	var bucketLock *sync.Mutex
+	var ok bool
+
+	bucketLock, ok = s.bucketByNameLock[bucketName]
+	if !ok {
+		bucketLock = &sync.Mutex{}
+		s.bucketByNameLock[bucketName] = bucketLock
+	}
+
+	bucketLock.Lock()
+}
+
+func (s *Store) unlockBucketName(bucketName string) {
+	s.bucketByNameMutex.Lock()
+	defer s.bucketByNameMutex.Unlock()
+
+	s.bucketByNameLock[bucketName].Unlock()
+	delete(s.bucketByNameLock, bucketName)
+}
+
 // CreateOrLoadBucket registers a bucket with the given name. If state on disk
 // exists for this bucket it is loaded, otherwise created. Pass [BucketOptions]
 // to configure the strategy of a bucket. The strategy defaults to "replace".
@@ -117,20 +143,8 @@ func (s *Store) bucketDir(bucketName string) string {
 func (s *Store) CreateOrLoadBucket(ctx context.Context, bucketName string,
 	opts ...BucketOption,
 ) error {
-	var bucketLock *sync.Mutex
-
-	s.bucketAccessLock.Lock()
-
-	_, ok := s.bucketByNameLock[bucketName]
-	if !ok {
-		s.bucketByNameLock[bucketName] = &sync.Mutex{}
-	}
-	bucketLock = s.bucketByNameLock[bucketName]
-
-	s.bucketAccessLock.Unlock()
-
-	bucketLock.Lock()
-	defer bucketLock.Unlock()
+	s.lockBucketName(bucketName)
+	defer s.unlockBucketName(bucketName)
 
 	if b := s.Bucket(bucketName); b != nil {
 		return nil
@@ -141,9 +155,6 @@ func (s *Store) CreateOrLoadBucket(ctx context.Context, bucketName string,
 	b, err := NewBucket(ctx, s.bucketDir(bucketName), s.rootDir, s.logger, s.metrics,
 		s.cycleCallbacks.compactionCallbacks, s.cycleCallbacks.flushCallbacks, opts...)
 	if err != nil {
-		s.bucketAccessLock.Lock()
-		delete(s.bucketByNameLock, bucketName)
-		s.bucketAccessLock.Unlock()
 		return err
 	}
 
