@@ -167,13 +167,13 @@ func TestIncrementalFilteredRecall(t *testing.T) {
 				defer wg.Done()
 				for i, vec := range myJobs {
 					originalIndex := (i * workerCount) + workerID
-					if originalIndex%99_999 == 0 && originalIndex != 0 {
+					if originalIndex%499_999 == 0 && originalIndex != 0 {
 						mutex.Lock()
 						fmt.Println("Threads stopped here.")
 						if hnsw_efg {
 							// convert jobsForWorker from map[int][]vecWithFilters to map[int][]*vertex
 							jobsForGraphRepairWorker := make([][]*vertex, workerCount)
-							repairStart := originalIndex - 99_999
+							repairStart := 0 // could try just the last K nodes in the *future*
 							for idx, node := range vectorIndex.nodes[repairStart:originalIndex] {
 								if node == nil {
 									fmt.Printf("Nil node at idx %d! \n", idx)
