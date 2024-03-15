@@ -224,9 +224,9 @@ func coordBackend(provider BackupBackendProvider, backend, id string) (coordStor
 }
 
 func (s *Scheduler) validateBackupRequest(ctx context.Context, store coordStore, req *BackupRequest) ([]string, error) {
-	if !store.b.IsExternal() && s.backupper.nodeResolver.NodeCount() > 1 {
-		return nil, errLocalBackendDBRO
-	}
+	// if !store.b.IsExternal() && s.backupper.nodeResolver.NodeCount() > 1 {
+	// 	return nil, errLocalBackendDBRO
+	// }
 
 	if err := validateID(req.ID); err != nil {
 		return nil, err
@@ -265,9 +265,9 @@ func (s *Scheduler) validateBackupRequest(ctx context.Context, store coordStore,
 }
 
 func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore, req *BackupRequest) (*backup.DistributedBackupDescriptor, error) {
-	if !store.b.IsExternal() && s.restorer.nodeResolver.NodeCount() > 1 {
-		return nil, errLocalBackendDBRO
-	}
+	// if !store.b.IsExternal() && s.restorer.nodeResolver.NodeCount() > 1 {
+	// 	return nil, errLocalBackendDBRO
+	// }
 	if len(req.Include) > 0 && len(req.Exclude) > 0 {
 		return nil, errIncludeExclude
 	}
