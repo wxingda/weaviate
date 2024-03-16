@@ -122,14 +122,17 @@ func FusionRelativeScore(weights []float64, resultSets [][]*search.Result, names
 	for i := range resultSets {
 		weight := float32(weights[i])
 		for _, res := range resultSets[i] {
+			min := minimum[i]
+			max := maximum[i]
+			scoreVal := res.SecondarySortValue
 			// If all scores are identical min and max are the same => just set score to the weight.
 			score := weight
-			if maximum[i] != minimum[i] {
-				score *= (res.SecondarySortValue - minimum[i]) / (maximum[i] - minimum[i])
+			if max != min {
+				score *= (scoreVal - min) / (max - min)
 			}
 
 			previousResult, ok := mapResults[res.ID]
-			explainScore := fmt.Sprintf("Hybrid (Result Set %v) Document %v: original score %v, normalized score: %v", names[i], res.ID, res.SecondarySortValue, score)
+			explainScore := fmt.Sprintf("Hybrid (Result Set %v) Document %v: original score %v, normalized score: %v", names[i], res.ID, scoreVal, score)
 			if ok {
 				score += previousResult.Score
 				explainScore += " - " + previousResult.ExplainScore
