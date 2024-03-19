@@ -33,7 +33,7 @@ type OffloadRequest struct {
 	Config *OffloadConfig `json:"config,omitempty"`
 
 	// List of tenants to include in the offload process
-	Tenants []string `json:"tenants"`
+	Tenant string `json:"tenant,omitempty"`
 }
 
 // Validate validates this offload request
