@@ -22,7 +22,7 @@ import (
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaviate/weaviate/entities/backup"
+	"github.com/weaviate/weaviate/entities/offload"
 	"github.com/weaviate/weaviate/usecases/config"
 )
 
@@ -50,11 +50,11 @@ const (
 	_MaxNumberConns     = 16
 )
 
-type nodeMap map[string]*backup.NodeDescriptor
+type nodeMap map[string]*offload.NodeDescriptor
 
 // participantStatus tracks status of a participant in a DBRO
 type participantStatus struct {
-	Status   backup.Status
+	Status   offload.Status
 	LastTime time.Time
 	Reason   string
 }
@@ -69,6 +69,8 @@ type selector interface {
 
 	// Backupable returns whether all given class can be backed up.
 	Backupable(_ context.Context, classes []string) error
+
+	TenantNodes(ctx context.Context, class string, tenant string) ([]string, error)
 }
 
 // coordinator coordinates a distributed backup and restore operation (DBRO):
@@ -95,8 +97,9 @@ type coordinator struct {
 
 	// state
 	Participants map[string]participantStatus
-	descriptor   *backup.DistributedBackupDescriptor
+	descriptor   *offload.DistributedOffloadDescriptor
 	shardSyncChan
+	// chans map[string]shardSyncChan
 
 	// timeouts
 	timeoutNodeDown    time.Duration
@@ -126,20 +129,20 @@ func newCoordinator(
 }
 
 // Backup coordinates a distributed backup among participants
-func (c *coordinator) Backup(ctx context.Context, store coordStore, req *Request) error {
+func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Request) error {
 	req.Method = OpCreate
-	groups, err := c.groupByShard(ctx, req.Classes)
+	groups, err := c.groupByNode(ctx, req.Class, req.Tenant)
 	if err != nil {
 		return err
 	}
 	// make sure there is no active backup
 	if prevID := c.lastOp.renew(req.ID, store.HomeDir()); prevID != "" {
-		return fmt.Errorf("backup %s already in progress", prevID)
+		return fmt.Errorf("offload %s already in progress", prevID)
 	}
 
-	c.descriptor = &backup.DistributedBackupDescriptor{
+	c.descriptor = &offload.DistributedOffloadDescriptor{
 		StartedAt:     time.Now().UTC(),
-		Status:        backup.Started,
+		Status:        offload.Started,
 		ID:            req.ID,
 		Nodes:         groups,
 		Version:       Version,
@@ -156,7 +159,7 @@ func (c *coordinator) Backup(ctx context.Context, store coordStore, req *Request
 		return err
 	}
 
-	if err := store.PutMeta(ctx, GlobalBackupFile, c.descriptor); err != nil {
+	if err := store.PutMeta(ctx, GlobalOffloadFile, c.descriptor); err != nil {
 		c.lastOp.reset()
 		return fmt.Errorf("cannot init meta file: %w", err)
 	}
@@ -172,10 +175,10 @@ func (c *coordinator) Backup(ctx context.Context, store coordStore, req *Request
 		ctx := context.Background()
 		c.commit(ctx, &statusReq, nodes, false)
 		logFields := logrus.Fields{"action": OpCreate, "backup_id": req.ID}
-		if err := store.PutMeta(ctx, GlobalBackupFile, c.descriptor); err != nil {
+		if err := store.PutMeta(ctx, GlobalOffloadFile, c.descriptor); err != nil {
 			c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
 		}
-		if c.descriptor.Status == backup.Success {
+		if c.descriptor.Status == offload.Success {
 			c.log.WithFields(logFields).Info("coordinator: backup completed successfully")
 		} else {
 			c.log.WithFields(logFields).Errorf("coordinator: %s", c.descriptor.Error)
@@ -187,11 +190,11 @@ func (c *coordinator) Backup(ctx context.Context, store coordStore, req *Request
 }
 
 // Restore coordinates a distributed restoration among participants
-func (c *coordinator) Restore(
+func (c *coordinator) Onload(
 	ctx context.Context,
 	store coordStore,
 	req *Request,
-	desc *backup.DistributedBackupDescriptor,
+	desc *offload.DistributedOffloadDescriptor,
 ) error {
 	req.Method = OpRestore
 	// make sure there is no active backup
@@ -211,7 +214,7 @@ func (c *coordinator) Restore(
 	}
 
 	// initial put so restore status is immediately available
-	if err := store.PutMeta(ctx, GlobalRestoreFile, c.descriptor); err != nil {
+	if err := store.PutMeta(ctx, GlobalOnloadFile, c.descriptor); err != nil {
 		c.lastOp.reset()
 		req := &AbortRequest{Method: OpRestore, ID: desc.ID, Backend: req.Backend}
 		c.abortAll(ctx, req, nodes)
@@ -224,10 +227,10 @@ func (c *coordinator) Restore(
 		ctx := context.Background()
 		c.commit(ctx, &statusReq, nodes, true)
 		logFields := logrus.Fields{"action": OpRestore, "backup_id": desc.ID}
-		if err := store.PutMeta(ctx, GlobalRestoreFile, c.descriptor); err != nil {
+		if err := store.PutMeta(ctx, GlobalOnloadFile, c.descriptor); err != nil {
 			c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
 		}
-		if c.descriptor.Status == backup.Success {
+		if c.descriptor.Status == offload.Success {
 			c.log.WithFields(logFields).Info("coordinator: backup restored successfully")
 		} else {
 			c.log.WithFields(logFields).Errorf("coordinator: %v", c.descriptor.Error)
@@ -238,31 +241,31 @@ func (c *coordinator) Restore(
 	return nil
 }
 
-func (c *coordinator) OnStatus(ctx context.Context, store coordStore, req *StatusRequest) (*Status, error) {
-	// check if backup is still active
-	st := c.lastOp.get()
-	if st.ID == req.ID {
-		return &Status{Path: st.Path, StartedAt: st.Starttime, Status: st.Status}, nil
-	}
-	filename := GlobalBackupFile
-	if req.Method == OpRestore {
-		filename = GlobalRestoreFile
-	}
-	// The backup might have been already created.
-	meta, err := store.Meta(ctx, filename)
-	if err != nil {
-		path := fmt.Sprintf("%s/%s", req.ID, filename)
-		return nil, fmt.Errorf("coordinator cannot get status: %w: %q: %v", errMetaNotFound, path, err)
-	}
+// func (c *coordinator) OnStatus(ctx context.Context, store coordStore, req *StatusRequest) (*Status, error) {
+// 	// check if backup is still active
+// 	st := c.lastOp.get()
+// 	if st.ID == req.ID {
+// 		return &Status{Path: st.Path, StartedAt: st.Starttime, Status: st.Status}, nil
+// 	}
+// 	filename := GlobalBackupFile
+// 	if req.Method == OpRestore {
+// 		filename = GlobalOnloadFile
+// 	}
+// 	// The backup might have been already created.
+// 	meta, err := store.Meta(ctx, filename)
+// 	if err != nil {
+// 		path := fmt.Sprintf("%s/%s", req.ID, filename)
+// 		return nil, fmt.Errorf("coordinator cannot get status: %w: %q: %v", errMetaNotFound, path, err)
+// 	}
 
-	return &Status{
-		Path:        store.HomeDir(),
-		StartedAt:   meta.StartedAt,
-		CompletedAt: meta.CompletedAt,
-		Status:      meta.Status,
-		Err:         meta.Error,
-	}, nil
-}
+// 	return &Status{
+// 		Path:        store.HomeDir(),
+// 		StartedAt:   meta.StartedAt,
+// 		CompletedAt: meta.CompletedAt,
+// 		Status:      meta.Status,
+// 		Err:         meta.Error,
+// 	}, nil
+// }
 
 // canCommit asks candidates if they agree to participate in DBRO
 // It returns and error if any candidates refuses to participate
@@ -279,7 +282,6 @@ func (c *coordinator) canCommit(ctx context.Context, req *Request) (map[string]s
 		r *Request
 	}
 
-	id := c.descriptor.ID
 	nodeMapping := c.descriptor.NodeMapping
 	groups := c.descriptor.Nodes
 
@@ -307,9 +309,10 @@ func (c *coordinator) canCommit(ctx context.Context, req *Request) (map[string]s
 				nodeHost{node, host},
 				&Request{
 					Method:      req.Method,
-					ID:          id,
+					ID:          req.ID,
 					Backend:     req.Backend,
-					Classes:     gr.Classes,
+					Class:       gr.Class,
+					Tenant:      gr.Tenant,
 					Duration:    _BookingPeriod,
 					NodeMapping: nodeMapping,
 					Compression: req.Compression,
@@ -337,7 +340,7 @@ func (c *coordinator) canCommit(ctx context.Context, req *Request) (map[string]s
 			return nil
 		})
 	}
-	abortReq := &AbortRequest{Method: req.Method, ID: id, Backend: req.Backend}
+	abortReq := &AbortRequest{Method: req.Method, ID: req.ID, Backend: req.Backend}
 	if err := g.Wait(); err != nil {
 		c.abortAll(ctx, abortReq, nodes)
 		return nil, err
@@ -371,14 +374,14 @@ func (c *coordinator) commit(ctx context.Context,
 		c.abortAll(context.Background(), req, node2Addr)
 	}
 	c.descriptor.CompletedAt = time.Now().UTC()
-	status := backup.Success
+	status := offload.Success
 	reason := ""
 	groups := c.descriptor.Nodes
 	for node, p := range c.Participants {
 		st := groups[c.descriptor.ToOriginalNodeName(node)]
 		st.Status, st.Error = p.Status, p.Reason
-		if p.Status != backup.Success {
-			status = backup.Failed
+		if p.Status != offload.Success {
+			status = offload.Failed
 			reason = p.Reason
 		}
 		groups[node] = st
@@ -414,16 +417,16 @@ func (c *coordinator) queryAll(ctx context.Context, req *StatusRequest, nodes ma
 		st := c.Participants[r.node]
 		if r.err == nil {
 			st.LastTime, st.Status, st.Reason = now, r.Status, r.Err
-			if r.Status == backup.Success {
+			if r.Status == offload.Success {
 				delete(nodes, r.node)
 			}
-			if r.Status == backup.Failed {
+			if r.Status == offload.Failed {
 				delete(nodes, r.node)
 				n++
 			}
 		} else if now.Sub(st.LastTime) > c.timeoutNodeDown {
 			n++
-			st.Status = backup.Failed
+			st.Status = offload.Failed
 			st.Reason = fmt.Sprintf("node %q might be down: %v", r.node, r.err.Error())
 			delete(nodes, r.node)
 		}
@@ -461,7 +464,7 @@ func (c *coordinator) commitAll(ctx context.Context, req *StatusRequest, nodes m
 	nFailures := 0
 	for x := range errChan {
 		st := c.Participants[x.node]
-		st.Status = backup.Failed
+		st.Status = offload.Failed
 		st.Reason = "might be down:" + x.err.Error()
 		c.Participants[x.node] = st
 		c.log.WithField("action", req.Method).
@@ -486,22 +489,17 @@ func (c *coordinator) abortAll(ctx context.Context, req *AbortRequest, nodes map
 }
 
 // groupByShard returns classes group by nodes
-func (c *coordinator) groupByShard(ctx context.Context, classes []string) (nodeMap, error) {
+func (c *coordinator) groupByNode(ctx context.Context, class string, tenant string) (nodeMap, error) {
 	m := make(nodeMap, 32)
-	for _, cls := range classes {
-		nodes, err := c.selector.Shards(ctx, cls)
-		if err != nil {
-			return nil, fmt.Errorf("class %q: %w", cls, errNoShardFound)
-		}
-		for _, node := range nodes {
-			nd, ok := m[node]
-			if !ok {
-				nd = &backup.NodeDescriptor{Classes: make([]string, 0, 5)}
-			}
-			nd.Classes = append(nd.Classes, cls)
-			m[node] = nd
-		}
+
+	nodes, err := c.selector.TenantNodes(ctx, class, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("class %q: %w", class, errNoShardFound)
 	}
+	for _, node := range nodes {
+		m[node] = &offload.NodeDescriptor{Class: class, Tenant: tenant}
+	}
+
 	return m, nil
 }
 

@@ -336,7 +336,11 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 		schemaManager, repo, appState.Modules)
 	appState.BackupManager = backupManager
 
-	enterrors.GoWrapper(func() { clusterapi.Serve(appState) }, appState.Logger)
+	offloadManager := offload.NewHandler(appState.Logger, appState.Authorizer,
+		schemaManager, repo, appState.Modules)
+	appState.OffloadManager = offloadManager
+
+	go clusterapi.Serve(appState)
 
 	vectorRepo.SetSchemaGetter(schemaManager)
 	explorer.SetSchemaGetter(schemaManager)

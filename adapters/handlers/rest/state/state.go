@@ -27,6 +27,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/auth/authentication/oidc"
 	"github.com/weaviate/weaviate/usecases/auth/authorization"
 	"github.com/weaviate/weaviate/usecases/backup"
+	"github.com/weaviate/weaviate/usecases/offload"
 	"github.com/weaviate/weaviate/usecases/cluster"
 	"github.com/weaviate/weaviate/usecases/config"
 	"github.com/weaviate/weaviate/usecases/locks"
@@ -68,6 +69,7 @@ type State struct {
 	ClassificationRepo *classifications.DistributedRepo
 	Metrics            *monitoring.PrometheusMetrics
 	BackupManager      *backup.Handler
+	OffloadManager     *offload.Handler
 	DB                 *db.DB
 	BatchManager       *objects.BatchManager
 	ClusterHttpClient  *http.Client

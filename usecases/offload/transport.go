@@ -15,7 +15,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/weaviate/weaviate/entities/backup"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 type client interface {
@@ -43,6 +43,8 @@ type Request struct {
 	Class string
 
 	Tenant string
+
+	ID string
 
 	// Duration
 	Duration time.Duration
@@ -75,7 +77,7 @@ type StatusResponse struct {
 	// Method is the backup operation (create, restore)
 	Method Op
 	ID     string
-	Status backup.Status
+	Status offload.Status
 	Err    string
 }
 

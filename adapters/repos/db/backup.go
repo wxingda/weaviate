@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	enterrors "github.com/weaviate/weaviate/entities/errors"
-
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
@@ -60,7 +58,7 @@ func (db *DB) ListBackupable() []string {
 func (db *DB) BackupDescriptors(ctx context.Context, bakid string, classes []string,
 ) <-chan backup.ClassDescriptor {
 	ds := make(chan backup.ClassDescriptor, len(classes))
-	f := func() {
+	go func() {
 		for _, c := range classes {
 			desc := backup.ClassDescriptor{Name: c}
 			idx := db.GetIndex(schema.ClassName(c))
@@ -68,15 +66,17 @@ func (db *DB) BackupDescriptors(ctx context.Context, bakid string, classes []str
 				desc.Error = fmt.Errorf("class %v doesn't exist any more", c)
 			} else if err := idx.descriptor(ctx, bakid, &desc); err != nil {
 				desc.Error = fmt.Errorf("backup class %v descriptor: %w", c, err)
+			} else {
+				desc.Error = ctx.Err()
 			}
+
 			ds <- desc
 			if desc.Error != nil {
 				break
 			}
 		}
 		close(ds)
-	}
-	enterrors.GoWrapper(f, db.logger)
+	}()
 	return ds
 }
 
@@ -189,6 +189,45 @@ func (db *DB) Shards(ctx context.Context, class string) ([]string, error) {
 	return nodes, nil
 }
 
+// Returns the list of nodes where shards of class are contained.
+// If there are no shards for the class, returns an empty list
+// If there are shards for the class but no nodes are found, return an error
+func (db *DB) TenantNodes(ctx context.Context, class string, tenant string) ([]string, error) {
+	unique := make(map[string]struct{})
+
+	ss := db.schemaGetter.CopyShardingState(class)
+	if len(ss.Physical) == 0 {
+		return []string{}, nil
+	}
+
+	foundTenant := false
+	for _, shard := range ss.Physical {
+		if tenant == shard.Name {
+			foundTenant = true
+			for _, node := range shard.BelongsToNodes {
+				unique[node] = struct{}{}
+			}
+		}
+	}
+
+	if !foundTenant {
+		return nil, fmt.Errorf("tenant %q not found", tenant)
+	}
+	if len(unique) == 0 {
+		return nil, fmt.Errorf("found tenant %q, but has 0 nodes", tenant)
+	}
+
+	nodes := make([]string, len(unique))
+	counter := 0
+
+	for node := range unique {
+		nodes[counter] = node
+		counter++
+	}
+
+	return nodes, nil
+}
+
 func (db *DB) ListClasses(ctx context.Context) []string {
 	classes := db.schemaGetter.GetSchemaSkipAuth().Objects.Classes
 	classNames := make([]string, len(classes))
@@ -205,11 +244,13 @@ func (i *Index) descriptor(ctx context.Context, backupID string, desc *backup.Cl
 	if err := i.initBackup(backupID); err != nil {
 		return err
 	}
+
 	defer func() {
 		if err != nil {
 			enterrors.GoWrapper(func() { i.ReleaseBackup(ctx, backupID) }, i.logger)
 		}
 	}()
+
 	// prevent writing into the index during collection of metadata
 	i.backupMutex.Lock()
 	defer i.backupMutex.Unlock()
@@ -235,14 +276,13 @@ func (i *Index) descriptor(ctx context.Context, backupID string, desc *backup.Cl
 	if desc.Schema, err = i.marshalSchema(); err != nil {
 		return fmt.Errorf("marshal schema %w", err)
 	}
-	return ctx.Err()
+	return nil
 }
 
 // ReleaseBackup marks the specified backup as inactive and restarts all
 // async background and maintenance processes. It errors if the backup does not exist
 // or is already inactive.
 func (i *Index) ReleaseBackup(ctx context.Context, id string) error {
-	i.logger.WithField("backup_id", id).WithField("class", i.Config.ClassName).Info("release backup")
 	defer i.resetBackupState()
 	if err := i.resumeMaintenanceCycles(ctx); err != nil {
 		return err
@@ -295,7 +335,9 @@ func (i *Index) marshalShardingState() ([]byte, error) {
 }
 
 func (i *Index) marshalSchema() ([]byte, error) {
-	b, err := i.getSchema.ReadOnlyClass(i.Config.ClassName.String()).MarshalBinary()
+	schema := i.getSchema.GetSchemaSkipAuth()
+
+	b, err := schema.GetClass(i.Config.ClassName).MarshalBinary()
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal schema")
 	}

@@ -15,7 +15,6 @@ import (
 	"github.com/go-openapi/runtime/middleware"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations"
-	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/backups"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/offloads"
 	"github.com/weaviate/weaviate/entities/models"
 	eoff "github.com/weaviate/weaviate/entities/offload"
@@ -95,7 +94,7 @@ func (s *offloadHandlers) offload(params offloads.OffloadParams,
 	meta, err := s.scheduler.Offload(params.HTTPRequest.Context(), principal, &uoff.OffloadRequest{
 		Backend:     params.Backend,
 		Class:       params.Class,
-		Tenants:     params.Body.Tenants,
+		Tenant:      params.Body.Tenant,
 		Compression: compressionFromOffloadCfg(params.Body.Config),
 	})
 	if err != nil {
@@ -114,7 +113,7 @@ func (s *offloadHandlers) offload(params offloads.OffloadParams,
 	}
 
 	// s.metricRequestsTotal.logOk("")
-	return backups.NewBackupsCreateOK().WithPayload(meta)
+	return offloads.NewOffloadOK().WithPayload(meta)
 }
 
 // func (s *backupHandlers) createBackupStatus(params backups.BackupsCreateStatusParams,
@@ -157,7 +156,7 @@ func (s *offloadHandlers) onload(params offloads.OnloadParams,
 	meta, err := s.scheduler.Onload(params.HTTPRequest.Context(), principal, &uoff.OffloadRequest{
 		Backend:     params.Backend,
 		Class:       params.Class,
-		Tenants:     params.Body.Tenants,
+		Tenant:      params.Body.Tenant,
 		NodeMapping: params.Body.NodeMapping,
 		Compression: compressionFromOnloadCfg(params.Body.Config),
 	})
@@ -180,7 +179,7 @@ func (s *offloadHandlers) onload(params offloads.OnloadParams,
 	}
 
 	// s.metricRequestsTotal.logOk("")
-	return backups.NewBackupsRestoreOK().WithPayload(meta)
+	return offloads.NewOnloadOK().WithPayload(meta)
 }
 
 // func (s *backupHandlers) restoreBackupStatus(params backups.BackupsRestoreStatusParams,

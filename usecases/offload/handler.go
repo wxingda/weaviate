@@ -124,11 +124,15 @@ type OffloadRequest struct {
 
 	// Include is list of class which need to be backed up
 	// The same class cannot appear in both Include and Exclude in the same request
-	Tenants []string
+	Tenant string
 
 	// NodeMapping is a map of node name replacement where key is the old name and value is the new name
 	// No effect if the map is empty
 	NodeMapping map[string]string
+}
+
+func (r *OffloadRequest) ID() string {
+	return fmt.Sprintf("%s/%s", r.Class, r.Tenant)
 }
 
 // OnCanCommit will be triggered when coordinator asks the node to participate

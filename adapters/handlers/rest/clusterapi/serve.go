@@ -32,6 +32,7 @@ func Serve(appState *state.State) {
 	classifications := NewClassifications(appState.ClassificationRepo.TxManager(), auth)
 	nodes := NewNodes(appState.RemoteNodeIncoming, auth)
 	backups := NewBackups(appState.BackupManager, auth)
+	offloads := NewOffloads(appState.OffloadManager, auth)
 
 	mux := http.NewServeMux()
 	mux.Handle("/classifications/transactions/",
@@ -46,6 +47,11 @@ func Serve(appState *state.State) {
 	mux.Handle("/backups/commit", backups.Commit())
 	mux.Handle("/backups/abort", backups.Abort())
 	mux.Handle("/backups/status", backups.Status())
+
+	mux.Handle("/offloads/can-commit", offloads.CanCommit())
+	mux.Handle("/offloads/commit", offloads.Commit())
+	mux.Handle("/offloads/abort", offloads.Abort())
+	mux.Handle("/offloads/status", offloads.Status())
 
 	mux.Handle("/", index())
 	http.ListenAndServe(fmt.Sprintf(":%d", port), mux)

@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/weaviate/weaviate/entities/backup"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 const (
@@ -28,16 +28,16 @@ const (
 type reqStat struct {
 	Starttime time.Time
 	ID        string
-	Status    backup.Status
+	Status    offload.Status
 	Path      string
 }
 
-type backupStat struct {
+type offloadStat struct {
 	sync.Mutex
 	reqStat
 }
 
-func (s *backupStat) get() reqStat {
+func (s *offloadStat) get() reqStat {
 	s.Lock()
 	defer s.Unlock()
 	return s.reqStat
@@ -45,20 +45,20 @@ func (s *backupStat) get() reqStat {
 
 // renew state if and only it is not in use
 // it returns "" in case of success and current id in case of failure
-func (s *backupStat) renew(id string, path string) string {
+func (s *offloadStat) renew(id string, path string) string {
 	s.Lock()
 	defer s.Unlock()
-	if s.reqStat.ID != "" {
+	if !s.reqStat.Starttime.IsZero() {
 		return s.reqStat.ID
 	}
 	s.reqStat.ID = id
 	s.reqStat.Path = path
 	s.reqStat.Starttime = time.Now().UTC()
-	s.reqStat.Status = backup.Started
+	s.reqStat.Status = offload.Started
 	return ""
 }
 
-func (s *backupStat) reset() {
+func (s *offloadStat) reset() {
 	s.Lock()
 	s.reqStat.ID = ""
 	s.reqStat.Path = ""
@@ -66,7 +66,7 @@ func (s *backupStat) reset() {
 	s.Unlock()
 }
 
-func (s *backupStat) set(st backup.Status) {
+func (s *offloadStat) set(st offload.Status) {
 	s.Lock()
 	s.reqStat.Status = st
 	s.Unlock()
@@ -76,7 +76,7 @@ func (s *backupStat) set(st backup.Status) {
 // It also contains the channel used to communicate with the coordinator.
 type shardSyncChan struct {
 	// lastOp makes sure backup operations are mutually exclusive
-	lastOp backupStat
+	lastOp offloadStat
 
 	// waitingForCoordinatorToCommit use while waiting for the coordinator to take the next action
 	waitingForCoordinatorToCommit atomic.Bool
