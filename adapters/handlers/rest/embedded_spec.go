@@ -2345,6 +2345,142 @@ func init() {
         ]
       }
     },
+    "/offloads/{backend}/{class}": {
+      "post": {
+        "description": "Starts a process of creating an offload for a set of tenants",
+        "tags": [
+          "offloads"
+        ],
+        "operationId": "offload",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Offload backend name e.g. filesystem, gcs, s3.",
+            "name": "backend",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "Class (name) offloaded tenants belong to",
+            "name": "class",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OffloadRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backup create process successfully started.",
+            "schema": {
+              "$ref": "#/definitions/OffloadResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized or invalid credentials."
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "422": {
+            "description": "Invalid offload attempt.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "An error has occurred while trying to fulfill the request. Most likely the ErrorResponse will contain more information about the error.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "x-serviceIds": [
+          "weaviate.local.offload"
+        ]
+      }
+    },
+    "/offloads/{backend}/{class}/onload": {
+      "post": {
+        "description": "Starts a process of onloading a set of tenants",
+        "tags": [
+          "offloads"
+        ],
+        "operationId": "onload",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Backup backend name e.g. filesystem, gcs, s3.",
+            "name": "backend",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "Class (name) offloaded tenants belong to",
+            "name": "class",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OnloadRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backup restoration process successfully started.",
+            "schema": {
+              "$ref": "#/definitions/OnloadResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized or invalid credentials."
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found - offloaded tenant does not exist",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "422": {
+            "description": "Invalid onload attempt.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "An error has occurred while trying to fulfill the request. Most likely the ErrorResponse will contain more information about the error.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "x-serviceIds": [
+          "weaviate.local.offload"
+        ]
+      }
+    },
     "/schema": {
       "get": {
         "tags": [
@@ -4365,6 +4501,174 @@ func init() {
           "description": "The total number of Objects for the query. The number of items in a response may be smaller due to paging.",
           "type": "integer",
           "format": "int64"
+        }
+      }
+    },
+    "OffloadConfig": {
+      "description": "Offload custom configuration",
+      "type": "object",
+      "properties": {
+        "CPUPercentage": {
+          "description": "Desired CPU core utilization ranging from 1%-80%",
+          "type": "integer",
+          "default": 50,
+          "maximum": 80,
+          "minimum": 1,
+          "x-nullable": false
+        },
+        "ChunkSize": {
+          "description": "Weaviate will attempt to come close the specified size, with a minimum of 2MB, default of 128MB, and a maximum of 512MB",
+          "type": "integer",
+          "default": 128,
+          "maximum": 512,
+          "minimum": 2,
+          "x-nullable": false
+        },
+        "CompressionLevel": {
+          "description": "compression level used by compression algorithm",
+          "type": "string",
+          "default": "DefaultCompression",
+          "enum": [
+            "DefaultCompression",
+            "BestSpeed",
+            "BestCompression"
+          ],
+          "x-nullable": false
+        }
+      }
+    },
+    "OffloadRequest": {
+      "description": "Request body for offloading a set of tenants",
+      "properties": {
+        "config": {
+          "description": "Custom configuration for the offload process",
+          "type": "object",
+          "$ref": "#/definitions/OffloadConfig"
+        },
+        "tenants": {
+          "description": "List of tenants to include in the offload process",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OffloadResponse": {
+      "description": "The definition of a offload response body",
+      "properties": {
+        "backend": {
+          "description": "Offload backend name e.g. filesystem, gcs, s3.",
+          "type": "string"
+        },
+        "class": {
+          "description": "Class (name) offloaded tenants belong to",
+          "type": "string"
+        },
+        "error": {
+          "description": "error message if offload failed",
+          "type": "string"
+        },
+        "path": {
+          "description": "destination path of offload files proper to selected backend",
+          "type": "string"
+        },
+        "status": {
+          "description": "phase of offload process",
+          "type": "string",
+          "default": "STARTED",
+          "enum": [
+            "STARTED",
+            "TRANSFERRING",
+            "TRANSFERRED",
+            "SUCCESS",
+            "FAILED"
+          ]
+        },
+        "tenants": {
+          "description": "The list of tenants for which the offload process was started",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OnloadConfig": {
+      "description": "Onload custom configuration",
+      "type": "object",
+      "properties": {
+        "CPUPercentage": {
+          "description": "Desired CPU core utilization ranging from 1%-80%",
+          "type": "integer",
+          "default": 50,
+          "maximum": 80,
+          "minimum": 1,
+          "x-nullable": false
+        }
+      }
+    },
+    "OnloadRequest": {
+      "description": "Request body for onloading a set of tenants",
+      "properties": {
+        "config": {
+          "description": "Custom configuration for the onload process",
+          "type": "object",
+          "$ref": "#/definitions/OnloadConfig"
+        },
+        "node_mapping": {
+          "description": "Allows overriding the node names stored in the backup with different ones. Useful when restoring backups to a different environment.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tenants": {
+          "description": "List of tenants to include in onload process",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OnloadResponse": {
+      "description": "The definition of a onload response body",
+      "properties": {
+        "backend": {
+          "description": "Onload backend name e.g. filesystem, gcs, s3.",
+          "type": "string"
+        },
+        "class": {
+          "description": "Class (name) onloaded tenants belong to",
+          "type": "string"
+        },
+        "error": {
+          "description": "error message if onload failed",
+          "type": "string"
+        },
+        "path": {
+          "description": "destination path of onload files proper to selected backend",
+          "type": "string"
+        },
+        "status": {
+          "description": "phase of onload process",
+          "type": "string",
+          "default": "STARTED",
+          "enum": [
+            "STARTED",
+            "TRANSFERRING",
+            "TRANSFERRED",
+            "SUCCESS",
+            "FAILED"
+          ]
+        },
+        "tenants": {
+          "description": "The list of classes for which the onload process was started",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -7713,6 +8017,142 @@ func init() {
         ]
       }
     },
+    "/offloads/{backend}/{class}": {
+      "post": {
+        "description": "Starts a process of creating an offload for a set of tenants",
+        "tags": [
+          "offloads"
+        ],
+        "operationId": "offload",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Offload backend name e.g. filesystem, gcs, s3.",
+            "name": "backend",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "Class (name) offloaded tenants belong to",
+            "name": "class",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OffloadRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backup create process successfully started.",
+            "schema": {
+              "$ref": "#/definitions/OffloadResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized or invalid credentials."
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "422": {
+            "description": "Invalid offload attempt.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "An error has occurred while trying to fulfill the request. Most likely the ErrorResponse will contain more information about the error.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "x-serviceIds": [
+          "weaviate.local.offload"
+        ]
+      }
+    },
+    "/offloads/{backend}/{class}/onload": {
+      "post": {
+        "description": "Starts a process of onloading a set of tenants",
+        "tags": [
+          "offloads"
+        ],
+        "operationId": "onload",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Backup backend name e.g. filesystem, gcs, s3.",
+            "name": "backend",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "Class (name) offloaded tenants belong to",
+            "name": "class",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OnloadRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backup restoration process successfully started.",
+            "schema": {
+              "$ref": "#/definitions/OnloadResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized or invalid credentials."
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found - offloaded tenant does not exist",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "422": {
+            "description": "Invalid onload attempt.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "An error has occurred while trying to fulfill the request. Most likely the ErrorResponse will contain more information about the error.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "x-serviceIds": [
+          "weaviate.local.offload"
+        ]
+      }
+    },
     "/schema": {
       "get": {
         "tags": [
@@ -9910,6 +10350,174 @@ func init() {
           "description": "The total number of Objects for the query. The number of items in a response may be smaller due to paging.",
           "type": "integer",
           "format": "int64"
+        }
+      }
+    },
+    "OffloadConfig": {
+      "description": "Offload custom configuration",
+      "type": "object",
+      "properties": {
+        "CPUPercentage": {
+          "description": "Desired CPU core utilization ranging from 1%-80%",
+          "type": "integer",
+          "default": 50,
+          "maximum": 80,
+          "minimum": 1,
+          "x-nullable": false
+        },
+        "ChunkSize": {
+          "description": "Weaviate will attempt to come close the specified size, with a minimum of 2MB, default of 128MB, and a maximum of 512MB",
+          "type": "integer",
+          "default": 128,
+          "maximum": 512,
+          "minimum": 2,
+          "x-nullable": false
+        },
+        "CompressionLevel": {
+          "description": "compression level used by compression algorithm",
+          "type": "string",
+          "default": "DefaultCompression",
+          "enum": [
+            "DefaultCompression",
+            "BestSpeed",
+            "BestCompression"
+          ],
+          "x-nullable": false
+        }
+      }
+    },
+    "OffloadRequest": {
+      "description": "Request body for offloading a set of tenants",
+      "properties": {
+        "config": {
+          "description": "Custom configuration for the offload process",
+          "type": "object",
+          "$ref": "#/definitions/OffloadConfig"
+        },
+        "tenants": {
+          "description": "List of tenants to include in the offload process",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OffloadResponse": {
+      "description": "The definition of a offload response body",
+      "properties": {
+        "backend": {
+          "description": "Offload backend name e.g. filesystem, gcs, s3.",
+          "type": "string"
+        },
+        "class": {
+          "description": "Class (name) offloaded tenants belong to",
+          "type": "string"
+        },
+        "error": {
+          "description": "error message if offload failed",
+          "type": "string"
+        },
+        "path": {
+          "description": "destination path of offload files proper to selected backend",
+          "type": "string"
+        },
+        "status": {
+          "description": "phase of offload process",
+          "type": "string",
+          "default": "STARTED",
+          "enum": [
+            "STARTED",
+            "TRANSFERRING",
+            "TRANSFERRED",
+            "SUCCESS",
+            "FAILED"
+          ]
+        },
+        "tenants": {
+          "description": "The list of tenants for which the offload process was started",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OnloadConfig": {
+      "description": "Onload custom configuration",
+      "type": "object",
+      "properties": {
+        "CPUPercentage": {
+          "description": "Desired CPU core utilization ranging from 1%-80%",
+          "type": "integer",
+          "default": 50,
+          "maximum": 80,
+          "minimum": 1,
+          "x-nullable": false
+        }
+      }
+    },
+    "OnloadRequest": {
+      "description": "Request body for onloading a set of tenants",
+      "properties": {
+        "config": {
+          "description": "Custom configuration for the onload process",
+          "type": "object",
+          "$ref": "#/definitions/OnloadConfig"
+        },
+        "node_mapping": {
+          "description": "Allows overriding the node names stored in the backup with different ones. Useful when restoring backups to a different environment.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tenants": {
+          "description": "List of tenants to include in onload process",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OnloadResponse": {
+      "description": "The definition of a onload response body",
+      "properties": {
+        "backend": {
+          "description": "Onload backend name e.g. filesystem, gcs, s3.",
+          "type": "string"
+        },
+        "class": {
+          "description": "Class (name) onloaded tenants belong to",
+          "type": "string"
+        },
+        "error": {
+          "description": "error message if onload failed",
+          "type": "string"
+        },
+        "path": {
+          "description": "destination path of onload files proper to selected backend",
+          "type": "string"
+        },
+        "status": {
+          "description": "phase of onload process",
+          "type": "string",
+          "default": "STARTED",
+          "enum": [
+            "STARTED",
+            "TRANSFERRING",
+            "TRANSFERRED",
+            "SUCCESS",
+            "FAILED"
+          ]
+        },
+        "tenants": {
+          "description": "The list of classes for which the onload process was started",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

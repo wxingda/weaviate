@@ -29,12 +29,12 @@ type backupper struct {
 	node     string
 	logger   logrus.FieldLogger
 	sourcer  Sourcer
-	backends BackupBackendProvider
+	backends OffloadBackendProvider
 	// shardCoordinationChan is sync and coordinate operations
 	shardSyncChan
 }
 
-func newBackupper(node string, logger logrus.FieldLogger, sourcer Sourcer, backends BackupBackendProvider,
+func newBackupper(node string, logger logrus.FieldLogger, sourcer Sourcer, backends OffloadBackendProvider,
 ) *backupper {
 	return &backupper{
 		node:          node,
