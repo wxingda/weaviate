@@ -18,13 +18,14 @@ import (
 
 // NodeDescriptor contains data related to one participant in DBRO
 type NodeDescriptor struct {
-	Classes []string `json:"classes"`
-	Status  Status   `json:"status"`
-	Error   string   `json:"error"`
+	Class  string `json:"class"`
+	Tenant string `json:"tenant"`
+	Status Status `json:"status"`
+	Error  string `json:"error"`
 }
 
 // DistributedBAckupDescriptor contains everything need to completely restore a distributed backup
-type DistributedBackupDescriptor struct {
+type DistributedOffloadDescriptor struct {
 	StartedAt     time.Time                  `json:"startedAt"`
 	CompletedAt   time.Time                  `json:"completedAt"`
 	ID            string                     `json:"id"` // User created backup id
@@ -36,13 +37,39 @@ type DistributedBackupDescriptor struct {
 	Error         string                     `json:"error"`
 }
 
+// func (d *DistributedOffloadDescriptor) Class() string {
+// 	set := make(map[string]struct{}, 2)
+// 	for _, desc := range d.Nodes {
+// 		set[desc.Class] = struct{}{}
+// 	}
+// 	if len(set) == 1 {
+// 		for class := range set {
+// 			return class
+// 		}
+// 	}
+// 	return ""
+// }
+
+// func (d *DistributedOffloadDescriptor) Tenant() string {
+// 	set := make(map[string]struct{}, 2)
+// 	for _, desc := range d.Nodes {
+// 		set[desc.Tenant] = struct{}{}
+// 	}
+// 	if len(set) == 1 {
+// 		for tenant := range set {
+// 			return tenant
+// 		}
+// 	}
+// 	return ""
+// }
+
 // Len returns how many nodes exist in d
-func (d *DistributedBackupDescriptor) Len() int {
+func (d *DistributedOffloadDescriptor) Len() int {
 	return len(d.Nodes)
 }
 
 // Count number of classes
-func (d *DistributedBackupDescriptor) Count() int {
+func (d *DistributedOffloadDescriptor) Count() int {
 	count := 0
 	for _, desc := range d.Nodes {
 		count += len(desc.Classes)
@@ -51,7 +78,7 @@ func (d *DistributedBackupDescriptor) Count() int {
 }
 
 // RemoveEmpty removes any nodes with an empty class list
-func (d *DistributedBackupDescriptor) RemoveEmpty() *DistributedBackupDescriptor {
+func (d *DistributedOffloadDescriptor) RemoveEmpty() *DistributedOffloadDescriptor {
 	for node, desc := range d.Nodes {
 		if len(desc.Classes) == 0 {
 			delete(d.Nodes, node)
@@ -61,7 +88,7 @@ func (d *DistributedBackupDescriptor) RemoveEmpty() *DistributedBackupDescriptor
 }
 
 // Classes returns all classes contained in d
-func (d *DistributedBackupDescriptor) Classes() []string {
+func (d *DistributedOffloadDescriptor) Classes() []string {
 	set := make(map[string]struct{}, 32)
 	for _, desc := range d.Nodes {
 		for _, cls := range desc.Classes {
@@ -78,7 +105,7 @@ func (d *DistributedBackupDescriptor) Classes() []string {
 }
 
 // Filter classes based on predicate
-func (d *DistributedBackupDescriptor) Filter(pred func(s string) bool) {
+func (d *DistributedOffloadDescriptor) Filter(pred func(s string) bool) {
 	for _, desc := range d.Nodes {
 		cs := make([]string, 0, len(desc.Classes))
 		for _, cls := range desc.Classes {
@@ -93,7 +120,7 @@ func (d *DistributedBackupDescriptor) Filter(pred func(s string) bool) {
 }
 
 // Include only these classes and remove everything else
-func (d *DistributedBackupDescriptor) Include(classes []string) {
+func (d *DistributedOffloadDescriptor) Include(classes []string) {
 	if len(classes) == 0 {
 		return
 	}
@@ -109,7 +136,7 @@ func (d *DistributedBackupDescriptor) Include(classes []string) {
 }
 
 // Exclude removes classes from d
-func (d *DistributedBackupDescriptor) Exclude(classes []string) {
+func (d *DistributedOffloadDescriptor) Exclude(classes []string) {
 	if len(classes) == 0 {
 		return
 	}
@@ -126,7 +153,7 @@ func (d *DistributedBackupDescriptor) Exclude(classes []string) {
 
 // ToMappedNodeName will return nodeName after applying d.NodeMapping translation on it.
 // If nodeName is not contained in d.nodeMapping, returns nodeName unmodified
-func (d *DistributedBackupDescriptor) ToMappedNodeName(nodeName string) string {
+func (d *DistributedOffloadDescriptor) ToMappedNodeName(nodeName string) string {
 	if newNodeName, ok := d.NodeMapping[nodeName]; ok {
 		return newNodeName
 	}
@@ -135,7 +162,7 @@ func (d *DistributedBackupDescriptor) ToMappedNodeName(nodeName string) string {
 
 // ToOriginalNodeName will return nodeName after trying to find an original node name from d.NodeMapping values.
 // If nodeName is not contained in d.nodeMapping values, returns nodeName unmodified
-func (d *DistributedBackupDescriptor) ToOriginalNodeName(nodeName string) string {
+func (d *DistributedOffloadDescriptor) ToOriginalNodeName(nodeName string) string {
 	for oldNodeName, newNodeName := range d.NodeMapping {
 		if newNodeName == nodeName {
 			return oldNodeName
@@ -146,7 +173,7 @@ func (d *DistributedBackupDescriptor) ToOriginalNodeName(nodeName string) string
 
 // ApplyNodeMapping applies d.NodeMapping translation to d.Nodes. If a node in d.Nodes is not translated by d.NodeMapping, it will remain
 // unchanged.
-func (d *DistributedBackupDescriptor) ApplyNodeMapping() {
+func (d *DistributedOffloadDescriptor) ApplyNodeMapping() {
 	if len(d.NodeMapping) == 0 {
 		return
 	}
@@ -161,7 +188,7 @@ func (d *DistributedBackupDescriptor) ApplyNodeMapping() {
 
 // AllExist checks if all classes exist in d.
 // It returns either "" or the first class which it could not find
-func (d *DistributedBackupDescriptor) AllExist(classes []string) string {
+func (d *DistributedOffloadDescriptor) AllExist(classes []string) string {
 	if len(classes) == 0 {
 		return ""
 	}
@@ -185,7 +212,7 @@ func (d *DistributedBackupDescriptor) AllExist(classes []string) string {
 	return first
 }
 
-func (d *DistributedBackupDescriptor) Validate() error {
+func (d *DistributedOffloadDescriptor) Validate() error {
 	if d.StartedAt.IsZero() || d.ID == "" ||
 		d.Version == "" || d.ServerVersion == "" || d.Error != "" {
 		return fmt.Errorf("attribute mismatch: [id versions time error]")
@@ -198,7 +225,7 @@ func (d *DistributedBackupDescriptor) Validate() error {
 
 // resetStatus sets status and sub-statuses to Started
 // It also empties error and sub-errors
-func (d *DistributedBackupDescriptor) ResetStatus() *DistributedBackupDescriptor {
+func (d *DistributedOffloadDescriptor) ResetStatus() *DistributedOffloadDescriptor {
 	d.Status = Started
 	d.Error = ""
 	d.StartedAt = time.Now()
@@ -380,14 +407,14 @@ func (d *BackupDescriptor) Validate(newSchema bool) error {
 }
 
 // ToDistributed is used just for backward compatibility with the old version.
-func (d *BackupDescriptor) ToDistributed() *DistributedBackupDescriptor {
+func (d *BackupDescriptor) ToDistributed() *DistributedOffloadDescriptor {
 	node, cs := "", d.List()
 	for _, xs := range d.Classes {
 		for _, s := range xs.Shards {
 			node = s.Node
 		}
 	}
-	result := &DistributedBackupDescriptor{
+	result := &DistributedOffloadDescriptor{
 		StartedAt:     d.StartedAt,
 		CompletedAt:   d.CompletedAt,
 		ID:            d.ID,

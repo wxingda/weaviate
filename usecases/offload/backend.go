@@ -28,6 +28,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/modulecapabilities"
+	"github.com/weaviate/weaviate/entities/offload"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 )
 
@@ -53,11 +54,11 @@ const (
 )
 
 const (
-	// BackupFile used by a node to store its metadata
-	BackupFile = "backup.json"
+	// OffloadFile used by a node to store its metadata
+	OffloadFile = "offload.json"
 	// GlobalBackupFile used by coordinator to store its metadata
-	GlobalBackupFile  = "backup_config.json"
-	GlobalRestoreFile = "restore_config.json"
+	GlobalOffloadFile = "offload_config.json"
+	GlobalOnloadFile  = "onload_config.json"
 	_TempDirectory    = ".backup.tmp"
 )
 
@@ -128,10 +129,10 @@ type nodeStore struct {
 // adjustBasePath: sets the base path to the old path if the backup has been created prior to v1.17.
 func (s *nodeStore) Meta(ctx context.Context, backupID string, adjustBasePath bool) (*backup.BackupDescriptor, error) {
 	var result backup.BackupDescriptor
-	err := s.meta(ctx, BackupFile, &result)
+	err := s.meta(ctx, OffloadFile, &result)
 	if err != nil {
 		cs := &objStore{s.b, backupID} // for backward compatibility
-		if err := cs.meta(ctx, BackupFile, &result); err == nil {
+		if err := cs.meta(ctx, OffloadFile, &result); err == nil {
 			if adjustBasePath {
 				s.objStore.BasePath = backupID
 			}
@@ -144,7 +145,7 @@ func (s *nodeStore) Meta(ctx context.Context, backupID string, adjustBasePath bo
 
 // meta marshals and uploads metadata
 func (s *nodeStore) PutMeta(ctx context.Context, desc *backup.BackupDescriptor) error {
-	return s.putMeta(ctx, BackupFile, desc)
+	return s.putMeta(ctx, OffloadFile, desc)
 }
 
 type coordStore struct {
@@ -152,20 +153,14 @@ type coordStore struct {
 }
 
 // PutMeta puts coordinator's global metadata into object store
-func (s *coordStore) PutMeta(ctx context.Context, filename string, desc *backup.DistributedBackupDescriptor) error {
+func (s *coordStore) PutMeta(ctx context.Context, filename string, desc *offload.DistributedOffloadDescriptor) error {
 	return s.putMeta(ctx, filename, desc)
 }
 
 // Meta gets coordinator's global metadata from object store
-func (s *coordStore) Meta(ctx context.Context, filename string) (*backup.DistributedBackupDescriptor, error) {
-	var result backup.DistributedBackupDescriptor
+func (s *coordStore) Meta(ctx context.Context, filename string) (*offload.DistributedOffloadDescriptor, error) {
+	var result offload.DistributedOffloadDescriptor
 	err := s.meta(ctx, filename, &result)
-	if err != nil && filename == GlobalBackupFile {
-		var oldBackup backup.BackupDescriptor
-		if err := s.meta(ctx, BackupFile, &oldBackup); err == nil {
-			return oldBackup.ToDistributed(), nil
-		}
-	}
 	return &result, err
 }
 
