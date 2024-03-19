@@ -36,7 +36,7 @@ const (
 
 var regExpID = regexp.MustCompile("^[a-z0-9_-]+$")
 
-type BackupBackendProvider interface {
+type OffloadBackendProvider interface {
 	BackupBackend(backend string) (modulecapabilities.BackupBackend, error)
 }
 
@@ -69,7 +69,7 @@ type Handler struct {
 	authorizer authorizer
 	backupper  *backupper
 	restorer   *restorer
-	backends   BackupBackendProvider
+	backends   OffloadBackendProvider
 }
 
 func NewHandler(
@@ -77,7 +77,7 @@ func NewHandler(
 	authorizer authorizer,
 	schema schemaManger,
 	sourcer Sourcer,
-	backends BackupBackendProvider,
+	backends OffloadBackendProvider,
 ) *Handler {
 	node := schema.NodeName()
 	m := &Handler{
@@ -112,22 +112,19 @@ type Compression struct {
 	CPUPercentage int
 }
 
-// BackupRequest a transition request from API to Backend.
-type BackupRequest struct {
+// OffloadRequest a transition request from API to Backend.
+type OffloadRequest struct {
 	// Compression is the compression configuration.
 	Compression
 
-	// ID is the backup ID
-	ID string
 	// Backend specify on which backend to store backups (gcs, s3, ..)
 	Backend string
 
+	Class string
+
 	// Include is list of class which need to be backed up
 	// The same class cannot appear in both Include and Exclude in the same request
-	Include []string
-	// Exclude means include all classes but those specified in Exclude
-	// The same class cannot appear in both Include and Exclude in the same request
-	Exclude []string
+	Tenants []string
 
 	// NodeMapping is a map of node name replacement where key is the old name and value is the new name
 	// No effect if the map is empty
@@ -255,7 +252,7 @@ func validateID(backupID string) error {
 	return nil
 }
 
-func nodeBackend(node string, provider BackupBackendProvider, backend, id string) (nodeStore, error) {
+func nodeBackend(node string, provider OffloadBackendProvider, backend, id string) (nodeStore, error) {
 	caps, err := provider.BackupBackend(backend)
 	if err != nil {
 		return nodeStore{}, err

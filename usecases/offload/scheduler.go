@@ -20,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/models"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 var (
@@ -36,9 +37,9 @@ type Scheduler struct {
 	// deps
 	logger     logrus.FieldLogger
 	authorizer authorizer
-	backupper  *coordinator
-	restorer   *coordinator
-	backends   BackupBackendProvider
+	offloader  *coordinator
+	onloader   *coordinator
+	backends   OffloadBackendProvider
 }
 
 // NewScheduler creates a new scheduler with two coordinators
@@ -46,7 +47,7 @@ func NewScheduler(
 	authorizer authorizer,
 	client client,
 	sourcer selector,
-	backends BackupBackendProvider,
+	backends OffloadBackendProvider,
 	nodeResolver nodeResolver,
 	logger logrus.FieldLogger,
 ) *Scheduler {
@@ -54,11 +55,11 @@ func NewScheduler(
 		logger:     logger,
 		authorizer: authorizer,
 		backends:   backends,
-		backupper: newCoordinator(
+		offloader: newCoordinator(
 			sourcer,
 			client,
 			logger, nodeResolver),
-		restorer: newCoordinator(
+		onloader: newCoordinator(
 			sourcer,
 			client,
 			logger, nodeResolver),
@@ -66,41 +67,41 @@ func NewScheduler(
 	return m
 }
 
-func (s *Scheduler) Backup(ctx context.Context, pr *models.Principal, req *BackupRequest,
+func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *OffloadRequest,
 ) (_ *models.BackupCreateResponse, err error) {
-	defer func(begin time.Time) {
-		logOperation(s.logger, "try_backup", req.ID, req.Backend, begin, err)
-	}(time.Now())
+	// defer func(begin time.Time) {
+	// 	logOperation(s.logger, "try_backup", req.ID, req.Backend, begin, err)
+	// }(time.Now())
 
-	path := fmt.Sprintf("backups/%s/%s", req.Backend, req.ID)
+	path := fmt.Sprintf("offloads/%s/%s", req.Backend, req.Class)
 	if err := s.authorizer.Authorize(pr, "add", path); err != nil {
 		return nil, err
 	}
-	store, err := coordBackend(s.backends, req.Backend, req.ID)
+	store, err := coordBackend(s.backends, req.Backend, req.Class)
 	if err != nil {
-		err = fmt.Errorf("no backup backend %q: %w, did you enable the right module?", req.Backend, err)
-		return nil, backup.NewErrUnprocessable(err)
+		err = fmt.Errorf("no offloads backend %q: %w, did you enable the right module?", req.Backend, err)
+		return nil, offload.NewErrUnprocessable(err)
 	}
 
-	classes, err := s.validateBackupRequest(ctx, store, req)
-	if err != nil {
-		return nil, backup.NewErrUnprocessable(err)
-	}
+	// classes, err := s.validateOffloadRequest(ctx, store, req)
+	// if err != nil {
+	// 	return nil, offload.NewErrUnprocessable(err)
+	// }
 
 	if err := store.Initialize(ctx); err != nil {
-		return nil, backup.NewErrUnprocessable(fmt.Errorf("init uploader: %w", err))
+		return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
 	}
 	breq := Request{
 		Method:      OpCreate,
-		ID:          req.ID,
 		Backend:     req.Backend,
-		Classes:     classes,
+		Class:       req.Class,
+		Tenant:      req.Tenants[0],
 		Compression: req.Compression,
 	}
-	if err := s.backupper.Backup(ctx, store, &breq); err != nil {
-		return nil, backup.NewErrUnprocessable(err)
+	if err := s.offloader.Backup(ctx, store, &breq); err != nil {
+		return nil, offload.NewErrUnprocessable(err)
 	} else {
-		st := s.backupper.lastOp.get()
+		st := s.offloader.lastOp.get()
 		status := string(st.Status)
 		return &models.BackupCreateResponse{
 			Classes: classes,
@@ -112,8 +113,8 @@ func (s *Scheduler) Backup(ctx context.Context, pr *models.Principal, req *Backu
 	}
 }
 
-func (s *Scheduler) Restore(ctx context.Context, pr *models.Principal,
-	req *BackupRequest,
+func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
+	req *OffloadRequest,
 ) (_ *models.BackupRestoreResponse, err error) {
 	defer func(begin time.Time) {
 		logOperation(s.logger, "try_restore", req.ID, req.Backend, begin, err)
@@ -148,7 +149,7 @@ func (s *Scheduler) Restore(ctx context.Context, pr *models.Principal,
 		Backend:     req.Backend,
 		Compression: req.Compression,
 	}
-	err = s.restorer.Restore(ctx, store, &rReq, meta)
+	err = s.onloader.Restore(ctx, store, &rReq, meta)
 	if err != nil {
 		status = string(backup.Failed)
 		data.Error = err.Error()
@@ -159,100 +160,100 @@ func (s *Scheduler) Restore(ctx context.Context, pr *models.Principal,
 	return data, nil
 }
 
-func (s *Scheduler) BackupStatus(ctx context.Context, principal *models.Principal,
-	backend, backupID string,
-) (_ *Status, err error) {
-	defer func(begin time.Time) {
-		logOperation(s.logger, "backup_status", backupID, backend, begin, err)
-	}(time.Now())
-	path := fmt.Sprintf("backups/%s/%s", backend, backupID)
-	if err := s.authorizer.Authorize(principal, "get", path); err != nil {
-		return nil, err
-	}
-	store, err := coordBackend(s.backends, backend, backupID)
-	if err != nil {
-		err = fmt.Errorf("no backup provider %q: %w, did you enable the right module?", backend, err)
-		return nil, backup.NewErrUnprocessable(err)
-	}
+// func (s *Scheduler) BackupStatus(ctx context.Context, principal *models.Principal,
+// 	backend, backupID string,
+// ) (_ *Status, err error) {
+// 	defer func(begin time.Time) {
+// 		logOperation(s.logger, "backup_status", backupID, backend, begin, err)
+// 	}(time.Now())
+// 	path := fmt.Sprintf("backups/%s/%s", backend, backupID)
+// 	if err := s.authorizer.Authorize(principal, "get", path); err != nil {
+// 		return nil, err
+// 	}
+// 	store, err := coordBackend(s.backends, backend, backupID)
+// 	if err != nil {
+// 		err = fmt.Errorf("no backup provider %q: %w, did you enable the right module?", backend, err)
+// 		return nil, backup.NewErrUnprocessable(err)
+// 	}
 
-	req := &StatusRequest{OpCreate, backupID, backend}
-	st, err := s.backupper.OnStatus(ctx, store, req)
-	if err != nil {
-		return nil, backup.NewErrNotFound(err)
-	}
-	return st, nil
-}
+// 	req := &StatusRequest{OpCreate, backupID, backend}
+// 	st, err := s.offloader.OnStatus(ctx, store, req)
+// 	if err != nil {
+// 		return nil, backup.NewErrNotFound(err)
+// 	}
+// 	return st, nil
+// }
 
-func (s *Scheduler) RestorationStatus(ctx context.Context, principal *models.Principal, backend, backupID string,
-) (_ *Status, err error) {
-	defer func(begin time.Time) {
-		logOperation(s.logger, "restoration_status", backupID, backend, time.Now(), err)
-	}(time.Now())
-	path := fmt.Sprintf("backups/%s/%s/restore", backend, backupID)
-	if err := s.authorizer.Authorize(principal, "get", path); err != nil {
-		return nil, err
-	}
-	store, err := coordBackend(s.backends, backend, backupID)
-	if err != nil {
-		err = fmt.Errorf("no backup provider %q: %w, did you enable the right module?", backend, err)
-		return nil, backup.NewErrUnprocessable(err)
-	}
-	req := &StatusRequest{OpRestore, backupID, backend}
-	st, err := s.restorer.OnStatus(ctx, store, req)
-	if err != nil {
-		return nil, backup.NewErrNotFound(err)
-	}
-	return st, nil
-}
+// func (s *Scheduler) RestorationStatus(ctx context.Context, principal *models.Principal, backend, backupID string,
+// ) (_ *Status, err error) {
+// 	defer func(begin time.Time) {
+// 		logOperation(s.logger, "restoration_status", backupID, backend, time.Now(), err)
+// 	}(time.Now())
+// 	path := fmt.Sprintf("backups/%s/%s/restore", backend, backupID)
+// 	if err := s.authorizer.Authorize(principal, "get", path); err != nil {
+// 		return nil, err
+// 	}
+// 	store, err := coordBackend(s.backends, backend, backupID)
+// 	if err != nil {
+// 		err = fmt.Errorf("no backup provider %q: %w, did you enable the right module?", backend, err)
+// 		return nil, backup.NewErrUnprocessable(err)
+// 	}
+// 	req := &StatusRequest{OpRestore, backupID, backend}
+// 	st, err := s.onloader.OnStatus(ctx, store, req)
+// 	if err != nil {
+// 		return nil, backup.NewErrNotFound(err)
+// 	}
+// 	return st, nil
+// }
 
-func coordBackend(provider BackupBackendProvider, backend, id string) (coordStore, error) {
+func coordBackend(provider OffloadBackendProvider, backend, class string) (coordStore, error) {
 	caps, err := provider.BackupBackend(backend)
 	if err != nil {
 		return coordStore{}, err
 	}
-	return coordStore{objStore{b: caps, BasePath: id}}, nil
+	return coordStore{objStore{b: caps, BasePath: class}}, nil
 }
 
-func (s *Scheduler) validateBackupRequest(ctx context.Context, store coordStore, req *BackupRequest) ([]string, error) {
-	// if !store.b.IsExternal() && s.backupper.nodeResolver.NodeCount() > 1 {
-	// 	return nil, errLocalBackendDBRO
-	// }
+// func (s *Scheduler) validateOffloadRequest(ctx context.Context, store coordStore, req *OffloadRequest) ([]string, error) {
+// 	// if !store.b.IsExternal() && s.backupper.nodeResolver.NodeCount() > 1 {
+// 	// 	return nil, errLocalBackendDBRO
+// 	// }
 
-	if err := validateID(req.ID); err != nil {
-		return nil, err
-	}
-	if len(req.Include) > 0 && len(req.Exclude) > 0 {
-		return nil, errIncludeExclude
-	}
-	if dup := findDuplicate(req.Include); dup != "" {
-		return nil, fmt.Errorf("class list 'include' contains duplicate: %s", dup)
-	}
-	classes := req.Include
-	if len(classes) == 0 {
-		classes = s.backupper.selector.ListClasses(ctx)
-		// no classes exist in the DB
-		if len(classes) == 0 {
-			return nil, fmt.Errorf("no available classes to backup, there's nothing to do here")
-		}
-	}
-	if classes = filterClasses(classes, req.Exclude); len(classes) == 0 {
-		return nil, fmt.Errorf("empty class list: please choose from : %v", classes)
-	}
+// 	if err := validateID(req.ID); err != nil {
+// 		return nil, err
+// 	}
+// 	if len(req.Include) > 0 && len(req.Exclude) > 0 {
+// 		return nil, errIncludeExclude
+// 	}
+// 	if dup := findDuplicate(req.Include); dup != "" {
+// 		return nil, fmt.Errorf("class list 'include' contains duplicate: %s", dup)
+// 	}
+// 	classes := req.Include
+// 	if len(classes) == 0 {
+// 		classes = s.offloader.selector.ListClasses(ctx)
+// 		// no classes exist in the DB
+// 		if len(classes) == 0 {
+// 			return nil, fmt.Errorf("no available classes to backup, there's nothing to do here")
+// 		}
+// 	}
+// 	if classes = filterClasses(classes, req.Exclude); len(classes) == 0 {
+// 		return nil, fmt.Errorf("empty class list: please choose from : %v", classes)
+// 	}
 
-	if err := s.backupper.selector.Backupable(ctx, classes); err != nil {
-		return nil, err
-	}
-	destPath := store.HomeDir()
-	// there is no backup with given id on the backend, regardless of its state (valid or corrupted)
-	_, err := store.Meta(ctx, GlobalBackupFile)
-	if err == nil {
-		return nil, fmt.Errorf("backup %q already exists at %q", req.ID, destPath)
-	}
-	if _, ok := err.(backup.ErrNotFound); !ok {
-		return nil, fmt.Errorf("check if backup %q exists at %q: %w", req.ID, destPath, err)
-	}
-	return classes, nil
-}
+// 	if err := s.offloader.selector.Backupable(ctx, classes); err != nil {
+// 		return nil, err
+// 	}
+// 	destPath := store.HomeDir()
+// 	// there is no backup with given id on the backend, regardless of its state (valid or corrupted)
+// 	_, err := store.Meta(ctx, GlobalBackupFile)
+// 	if err == nil {
+// 		return nil, fmt.Errorf("backup %q already exists at %q", req.ID, destPath)
+// 	}
+// 	if _, ok := err.(backup.ErrNotFound); !ok {
+// 		return nil, fmt.Errorf("check if backup %q exists at %q: %w", req.ID, destPath, err)
+// 	}
+// 	return classes, nil
+// }
 
 func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore, req *BackupRequest) (*backup.DistributedBackupDescriptor, error) {
 	// if !store.b.IsExternal() && s.restorer.nodeResolver.NodeCount() > 1 {

@@ -26,7 +26,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/config"
 )
 
-// Op is the kind of a backup operation
+// Op is the kind of a offload operation
 type Op string
 
 const (

@@ -32,8 +32,7 @@ type client interface {
 type Request struct {
 	// Method is the backup operation (create, restore)
 	Method Op
-	// ID is the backup ID
-	ID string
+
 	// Backend specify on which backend to store backups (gcs, s3, ..)
 	Backend string
 
@@ -41,7 +40,9 @@ type Request struct {
 	NodeMapping map[string]string
 
 	// Classes is list of class which need to be backed up
-	Classes []string
+	Class string
+
+	Tenant string
 
 	// Duration
 	Duration time.Duration

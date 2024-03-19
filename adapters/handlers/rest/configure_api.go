@@ -91,6 +91,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/modules"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 	"github.com/weaviate/weaviate/usecases/objects"
+	"github.com/weaviate/weaviate/usecases/offload"
 	"github.com/weaviate/weaviate/usecases/replica"
 	"github.com/weaviate/weaviate/usecases/scaler"
 	"github.com/weaviate/weaviate/usecases/schema"
@@ -471,6 +472,13 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		appState.Cluster,
 		appState.Logger)
 	setupBackupHandlers(api, backupScheduler, appState.Metrics, appState.Logger)
+	offloadScheduler := offload.NewScheduler(
+		appState.Authorizer,
+		clients.NewClusterOffloads(appState.ClusterHttpClient),
+		appState.DB, appState.Modules,
+		appState.Cluster,
+		appState.Logger)
+	setupOffloadHandlers(api, offloadScheduler, appState.Metrics, appState.Logger)
 	setupNodesHandlers(api, appState.SchemaManager, appState.DB, appState)
 
 	grpcServer := createGrpcServer(appState)

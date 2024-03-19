@@ -31,7 +31,7 @@ type restorer struct {
 	node     string // node name
 	logger   logrus.FieldLogger
 	sourcer  Sourcer
-	backends BackupBackendProvider
+	backends OffloadBackendProvider
 	schema   schemaManger
 	shardSyncChan
 
@@ -44,7 +44,7 @@ type restorer struct {
 
 func newRestorer(node string, logger logrus.FieldLogger,
 	sourcer Sourcer,
-	backends BackupBackendProvider,
+	backends OffloadBackendProvider,
 	schema schemaManger,
 ) *restorer {
 	return &restorer{
