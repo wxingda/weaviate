@@ -4480,12 +4480,9 @@ func init() {
           "type": "object",
           "$ref": "#/definitions/OffloadConfig"
         },
-        "tenants": {
+        "tenant": {
           "description": "List of tenants to include in the offload process",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "type": "string"
         }
       }
     },
@@ -4497,7 +4494,7 @@ func init() {
           "type": "string"
         },
         "class": {
-          "description": "Class (name) offloaded tenants belong to",
+          "description": "Class (name) offloaded tenant belongs to",
           "type": "string"
         },
         "error": {
@@ -4520,12 +4517,9 @@ func init() {
             "FAILED"
           ]
         },
-        "tenants": {
-          "description": "The list of tenants for which the offload process was started",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "tenant": {
+          "description": "Tenant for which the offload process was started",
+          "type": "string"
         }
       }
     },
@@ -4552,18 +4546,15 @@ func init() {
           "$ref": "#/definitions/OnloadConfig"
         },
         "node_mapping": {
-          "description": "Allows overriding the node names stored in the backup with different ones. Useful when restoring backups to a different environment.",
+          "description": "Allows overriding the node names stored in the offload with different ones. Useful when onloading to a different environment.",
           "type": "object",
           "additionalProperties": {
             "type": "string"
           }
         },
-        "tenants": {
-          "description": "List of tenants to include in onload process",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "tenant": {
+          "description": "Tenants to include in onload process",
+          "type": "string"
         }
       }
     },
@@ -4575,7 +4566,7 @@ func init() {
           "type": "string"
         },
         "class": {
-          "description": "Class (name) onloaded tenants belong to",
+          "description": "Class (name) onloaded tenant belongs to",
           "type": "string"
         },
         "error": {
@@ -4598,12 +4589,9 @@ func init() {
             "FAILED"
           ]
         },
-        "tenants": {
+        "tenant": {
           "description": "The list of classes for which the onload process was started",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "type": "string"
         }
       }
     },
@@ -10148,12 +10136,9 @@ func init() {
           "type": "object",
           "$ref": "#/definitions/OffloadConfig"
         },
-        "tenants": {
+        "tenant": {
           "description": "List of tenants to include in the offload process",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "type": "string"
         }
       }
     },
@@ -10165,7 +10150,7 @@ func init() {
           "type": "string"
         },
         "class": {
-          "description": "Class (name) offloaded tenants belong to",
+          "description": "Class (name) offloaded tenant belongs to",
           "type": "string"
         },
         "error": {
@@ -10188,12 +10173,9 @@ func init() {
             "FAILED"
           ]
         },
-        "tenants": {
-          "description": "The list of tenants for which the offload process was started",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "tenant": {
+          "description": "Tenant for which the offload process was started",
+          "type": "string"
         }
       }
     },
@@ -10220,18 +10202,15 @@ func init() {
           "$ref": "#/definitions/OnloadConfig"
         },
         "node_mapping": {
-          "description": "Allows overriding the node names stored in the backup with different ones. Useful when restoring backups to a different environment.",
+          "description": "Allows overriding the node names stored in the offload with different ones. Useful when onloading to a different environment.",
           "type": "object",
           "additionalProperties": {
             "type": "string"
           }
         },
-        "tenants": {
-          "description": "List of tenants to include in onload process",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "tenant": {
+          "description": "Tenants to include in onload process",
+          "type": "string"
         }
       }
     },
@@ -10243,7 +10222,7 @@ func init() {
           "type": "string"
         },
         "class": {
-          "description": "Class (name) onloaded tenants belong to",
+          "description": "Class (name) onloaded tenant belongs to",
           "type": "string"
         },
         "error": {
@@ -10266,12 +10245,9 @@ func init() {
             "FAILED"
           ]
         },
-        "tenants": {
+        "tenant": {
           "description": "The list of classes for which the onload process was started",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "type": "string"
         }
       }
     },

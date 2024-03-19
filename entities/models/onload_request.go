@@ -32,11 +32,11 @@ type OnloadRequest struct {
 	// Custom configuration for the onload process
 	Config *OnloadConfig `json:"config,omitempty"`
 
-	// Allows overriding the node names stored in the backup with different ones. Useful when restoring backups to a different environment.
+	// Allows overriding the node names stored in the offload with different ones. Useful when onloading to a different environment.
 	NodeMapping map[string]string `json:"node_mapping,omitempty"`
 
-	// List of tenants to include in onload process
-	Tenants []string `json:"tenants"`
+	// Tenants to include in onload process
+	Tenant string `json:"tenant,omitempty"`
 }
 
 // Validate validates this onload request

@@ -34,7 +34,7 @@ type OnloadResponse struct {
 	// Onload backend name e.g. filesystem, gcs, s3.
 	Backend string `json:"backend,omitempty"`
 
-	// Class (name) onloaded tenants belong to
+	// Class (name) onloaded tenant belongs to
 	Class string `json:"class,omitempty"`
 
 	// error message if onload failed
@@ -48,7 +48,7 @@ type OnloadResponse struct {
 	Status *string `json:"status,omitempty"`
 
 	// The list of classes for which the onload process was started
-	Tenants []string `json:"tenants"`
+	Tenant string `json:"tenant,omitempty"`
 }
 
 // Validate validates this onload response

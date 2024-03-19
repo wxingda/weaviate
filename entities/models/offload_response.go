@@ -34,7 +34,7 @@ type OffloadResponse struct {
 	// Offload backend name e.g. filesystem, gcs, s3.
 	Backend string `json:"backend,omitempty"`
 
-	// Class (name) offloaded tenants belong to
+	// Class (name) offloaded tenant belongs to
 	Class string `json:"class,omitempty"`
 
 	// error message if offload failed
@@ -47,8 +47,8 @@ type OffloadResponse struct {
 	// Enum: [STARTED TRANSFERRING TRANSFERRED SUCCESS FAILED]
 	Status *string `json:"status,omitempty"`
 
-	// The list of tenants for which the offload process was started
-	Tenants []string `json:"tenants"`
+	// Tenant for which the offload process was started
+	Tenant string `json:"tenant,omitempty"`
 }
 
 // Validate validates this offload response
