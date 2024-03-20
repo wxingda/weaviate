@@ -201,7 +201,7 @@ func TestFilteredRecall(t *testing.T) {
 			minorityFilter := map[int]int{0: 4} // Now this is really a ToDo
 			// ToDo Add Multi-Threaded Graph Repair
 			workerCount = runtime.GOMAXPROCS(0)
-			jobsForGraphRepairWorker := make([][]*vertex, workerCount)
+			jobsForGraphRepairWorker := make([][]*vertex, 0, workerCount) // NOTE, UPDATED
 			for idx, node := range vectorIndex.nodes {
 				if node == nil {
 					fmt.Printf("Nil node at idx %d! \n", idx)
