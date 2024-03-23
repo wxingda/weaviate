@@ -29,6 +29,7 @@ const (
 )
 
 var availableCohereModels = []string{
+	"command-r",
 	"command-xlarge-beta",
 	"command-xlarge", "command-medium", "command-xlarge-nightly", "command-medium-nightly", "xlarge", "medium",
 	"command", "command-light", "command-nightly", "command-light-nightly", "base", "base-light",
