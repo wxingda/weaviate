@@ -103,7 +103,7 @@ func (m *Manager) handleAddClassCommitAndParse(ctx context.Context, pl *AddClass
 	}
 
 	pl.State.SetLocalName(m.clusterState.LocalName())
-	return m.addClassApplyChanges(ctx, pl.Class, pl.State)
+	return m.addClassApplyChanges(ctx, pl.Class, pl.State, pl.Restored)
 }
 
 func (m *Manager) handleAddPropertyCommit(ctx context.Context,

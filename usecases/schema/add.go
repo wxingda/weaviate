@@ -38,6 +38,8 @@ import (
 	"github.com/weaviate/weaviate/usecases/sharding"
 )
 
+var ErrClassExists = errors.New("class already exists")
+
 // AddClass to the schema
 func (m *Manager) AddClass(ctx context.Context, principal *models.Principal,
 	class *models.Class,
@@ -47,7 +49,7 @@ func (m *Manager) AddClass(ctx context.Context, principal *models.Principal,
 		return err
 	}
 
-	shardState, err := m.addClass(ctx, class)
+	shardState, err := m.addClass(ctx, class, nil, false)
 	if err != nil {
 		return err
 	}
@@ -70,64 +72,23 @@ func (m *Manager) RestoreClass(ctx context.Context, d *backup.ClassDescriptor, n
 			return fmt.Errorf("marshal sharding state: %w", err)
 		}
 	}
+	shardingState.MigrateFromOldFormat()
+	shardingState.ApplyNodeMapping(nodeMapping)
 
-	m.Lock()
-	defer m.Unlock()
 	metric, err := monitoring.GetMetrics().BackupRestoreClassDurations.GetMetricWithLabelValues(class.Class)
 	if err == nil {
 		timer := prometheus.NewTimer(metric)
 		defer timer.ObserveDuration()
 	}
 
-	class.Class = schema.UppercaseClassName(class.Class)
-	class.Properties = schema.LowercaseAllPropertyNames(class.Properties)
-
-	m.setClassDefaults(class)
-	err = m.validateCanAddClass(ctx, class, true)
-	if err != nil {
-		return err
-	}
-	// migrate only after validation in completed
-	m.migrateClassSettings(class)
-
-	err = m.parseShardingConfig(ctx, class)
-	if err != nil {
+	if _, err := m.addClass(ctx, class, &shardingState, true); err != nil {
 		return err
 	}
 
-	err = m.parseVectorIndexConfig(ctx, class)
-	if err != nil {
-		return err
-	}
-
-	err = m.invertedConfigValidator(class.InvertedIndexConfig)
-	if err != nil {
-		return err
-	}
-
-	shardingState.MigrateFromOldFormat()
-	shardingState.ApplyNodeMapping(nodeMapping)
-
-	payload, err := CreateClassPayload(class, &shardingState)
-	if err != nil {
-		return err
-	}
-	shardingState.SetLocalName(m.clusterState.LocalName())
-	m.schemaCache.addClass(class, &shardingState)
-
-	if err := m.repo.NewClass(ctx, payload); err != nil {
-		return err
-	}
-	m.logger.
-		WithField("action", "schema_restore_class").
-		Debugf("restore class %q from schema", class.Class)
-	m.triggerSchemaUpdateCallbacks()
-
-	out := m.migrator.AddClass(ctx, class, &shardingState)
-	return out
+	return m.migrator.AddClass(ctx, class, &shardingState)
 }
 
-func (m *Manager) addClass(ctx context.Context, class *models.Class,
+func (m *Manager) addClass(ctx context.Context, class *models.Class, shardState *sharding.State, restored bool,
 ) (*sharding.State, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -144,7 +105,10 @@ func (m *Manager) addClass(ctx context.Context, class *models.Class,
 
 	m.setClassDefaults(class)
 	err := m.validateCanAddClass(ctx, class, false)
-	if err != nil {
+	if err := m.validateCanAddClass(ctx, class, false); err != nil {
+		if restored && errors.Is(err, ErrClassExists) {
+			return shardState, nil
+		}
 		return nil, err
 	}
 	// migrate only after validation in completed
@@ -164,17 +128,18 @@ func (m *Manager) addClass(ctx context.Context, class *models.Class,
 	if err != nil {
 		return nil, err
 	}
-
-	shardState, err := sharding.InitState(class.Class,
-		class.ShardingConfig.(sharding.Config),
-		m.clusterState, class.ReplicationConfig.Factor,
-		schema.MultiTenancyEnabled(class))
-	if err != nil {
-		return nil, errors.Wrap(err, "init sharding state")
+	if shardState == nil {
+		shardState, err = sharding.InitState(class.Class,
+			class.ShardingConfig.(sharding.Config),
+			m.clusterState, class.ReplicationConfig.Factor,
+			schema.MultiTenancyEnabled(class))
+		if err != nil {
+			return nil, errors.Wrap(err, "init sharding state")
+		}
 	}
 
 	tx, err := m.cluster.BeginTransaction(ctx, AddClass,
-		AddClassPayload{class, shardState}, DefaultTxTTL)
+		AddClassPayload{class, shardState, restored}, DefaultTxTTL)
 	if err != nil {
 		// possible causes for errors could be nodes down (we expect every node to
 		// the up for a schema transaction) or concurrent transactions from other
@@ -199,21 +164,24 @@ func (m *Manager) addClass(ctx context.Context, class *models.Class,
 		m.logger.WithError(err).Errorf("not every node was able to commit")
 	}
 
-	if err := m.addClassApplyChanges(ctx, class, shardState); err != nil {
+	if err := m.addClassApplyChanges(ctx, class, shardState, restored); err != nil {
 		return nil, err
 	}
 	return shardState, nil
 }
 
 func (m *Manager) addClassApplyChanges(ctx context.Context, class *models.Class,
-	shardingState *sharding.State,
+	shardingState *sharding.State, restored bool,
 ) error {
+	shardingState.SetLocalName(m.clusterState.LocalName())
 	payload, err := CreateClassPayload(class, shardingState)
 	if err != nil {
 		return err
 	}
 	if err := m.repo.NewClass(ctx, payload); err != nil {
-		return err
+		if !restored || !errors.Is(err, ErrClassExists) {
+			return err
+		}
 	}
 
 	m.logger.

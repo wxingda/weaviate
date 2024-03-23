@@ -62,8 +62,9 @@ var allowUnreadyTxs = []cluster.TransactionType{
 }
 
 type AddClassPayload struct {
-	Class *models.Class   `json:"class"`
-	State *sharding.State `json:"state"`
+	Class    *models.Class   `json:"class"`
+	State    *sharding.State `json:"state"`
+	Restored bool            `json:"restored"`
 }
 
 type AddPropertyPayload struct {

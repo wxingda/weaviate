@@ -24,6 +24,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/models"
+	"github.com/weaviate/weaviate/usecases/schema"
 	ucs "github.com/weaviate/weaviate/usecases/schema"
 	"github.com/weaviate/weaviate/usecases/sharding"
 	bolt "go.etcd.io/bbolt"
@@ -242,6 +243,9 @@ func (r *store) NewClass(_ context.Context, data ucs.ClassPayload) error {
 	f := func(tx *bolt.Tx) error {
 		b, err := tx.Bucket(schemaBucket).CreateBucket(classKey)
 		if err != nil {
+			if errors.Is(err, bolt.ErrBucketExists) {
+				return fmt.Errorf("%w: %w", schema.ErrClassExists)
+			}
 			return err
 		}
 		return r.updateClass(b, data)

@@ -51,7 +51,7 @@ func (m *Manager) repairLocalClasses(ctx context.Context, classes []*models.Clas
 		if err != nil {
 			return fmt.Errorf("init sharding state: %w", err)
 		}
-		if err = m.addClassApplyChanges(ctx, class, shardState); err != nil {
+		if err = m.addClassApplyChanges(ctx, class, shardState, false); err != nil {
 			return fmt.Errorf("add class %q locally: %w", class.Class, err)
 		}
 	}
