@@ -12,6 +12,7 @@
 package offload
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -138,23 +139,23 @@ type OffloadDistributedDescriptor struct {
 
 // // ToMappedNodeName will return nodeName after applying d.NodeMapping translation on it.
 // // If nodeName is not contained in d.nodeMapping, returns nodeName unmodified
-// func (d *DistributedBackupDescriptor) ToMappedNodeName(nodeName string) string {
-// 	if newNodeName, ok := d.NodeMapping[nodeName]; ok {
-// 		return newNodeName
-// 	}
-// 	return nodeName
-// }
+func (d *OffloadDistributedDescriptor) ToMappedNodeName(nodeName string) string {
+	if newNodeName, ok := d.NodeMapping[nodeName]; ok {
+		return newNodeName
+	}
+	return nodeName
+}
 
 // // ToOriginalNodeName will return nodeName after trying to find an original node name from d.NodeMapping values.
 // // If nodeName is not contained in d.nodeMapping values, returns nodeName unmodified
-// func (d *DistributedBackupDescriptor) ToOriginalNodeName(nodeName string) string {
-// 	for oldNodeName, newNodeName := range d.NodeMapping {
-// 		if newNodeName == nodeName {
-// 			return oldNodeName
-// 		}
-// 	}
-// 	return nodeName
-// }
+func (d *OffloadDistributedDescriptor) ToOriginalNodeName(nodeName string) string {
+	for oldNodeName, newNodeName := range d.NodeMapping {
+		if newNodeName == nodeName {
+			return oldNodeName
+		}
+	}
+	return nodeName
+}
 
 // // ApplyNodeMapping applies d.NodeMapping translation to d.Nodes. If a node in d.Nodes is not translated by d.NodeMapping, it will remain
 // // unchanged.
@@ -197,30 +198,30 @@ type OffloadDistributedDescriptor struct {
 // 	return first
 // }
 
-// func (d *DistributedBackupDescriptor) Validate() error {
-// 	if d.StartedAt.IsZero() || d.ID == "" ||
-// 		d.Version == "" || d.ServerVersion == "" || d.Error != "" {
-// 		return fmt.Errorf("attribute mismatch: [id versions time error]")
-// 	}
-// 	if len(d.Nodes) == 0 {
-// 		return fmt.Errorf("empty list of node descriptors")
-// 	}
-// 	return nil
-// }
+func (d *OffloadDistributedDescriptor) Validate() error {
+	if d.StartedAt.IsZero() || d.ID == "" ||
+		d.Version == "" || d.ServerVersion == "" || d.Error != "" {
+		return fmt.Errorf("attribute mismatch: [id versions time error]")
+	}
+	if len(d.Nodes) == 0 {
+		return fmt.Errorf("empty list of node descriptors")
+	}
+	return nil
+}
 
 // // resetStatus sets status and sub-statuses to Started
 // // It also empties error and sub-errors
-// func (d *DistributedBackupDescriptor) ResetStatus() *DistributedBackupDescriptor {
-// 	d.Status = Started
-// 	d.Error = ""
-// 	d.StartedAt = time.Now()
-// 	d.CompletedAt = time.Time{}
-// 	for _, node := range d.Nodes {
-// 		node.Status = Started
-// 		node.Error = ""
-// 	}
-// 	return d
-// }
+func (d *OffloadDistributedDescriptor) ResetStatus() *OffloadDistributedDescriptor {
+	d.Status = Started
+	d.Error = ""
+	d.StartedAt = time.Now()
+	d.CompletedAt = time.Time{}
+	for _, node := range d.Nodes {
+		node.Status = Started
+		node.Error = ""
+	}
+	return d
+}
 
 type ShardDescriptor struct {
 	// Tenant string   `json:"tenant"`
@@ -402,26 +403,18 @@ type OffloadNodeDescriptor struct {
 // 	return nil
 // }
 
-// func (d *BackupDescriptor) Validate(newSchema bool) error {
-// 	if d.StartedAt.IsZero() || d.ID == "" ||
-// 		d.Version == "" || d.ServerVersion == "" || d.Error != "" {
-// 		return fmt.Errorf("attribute mismatch: [id versions time error]")
-// 	}
-// 	if !newSchema {
-// 		return d.validateV1()
-// 	}
-// 	for _, c := range d.Classes {
-// 		if c.Name == "" || len(c.Schema) == 0 || len(c.ShardingState) == 0 {
-// 			return fmt.Errorf("class=%q: invalid attributes [name schema sharding]", c.Name)
-// 		}
-// 		for _, s := range c.Shards {
-// 			if s.Name == "" || s.Node == "" {
-// 				return fmt.Errorf("class=%q: invalid shard %q node=%q", c.Name, s.Name, s.Node)
-// 			}
-// 		}
-// 	}
-// 	return nil
-// }
+func (d *OffloadNodeDescriptor) Validate() error {
+	if d.StartedAt.IsZero() || d.ID == "" ||
+		d.Version == "" || d.ServerVersion == "" || d.Error != "" {
+		return fmt.Errorf("attribute mismatch: [id versions time error]")
+	}
+
+	if d.Class == "" || d.Tenant == "" || d.Node == "" {
+		return fmt.Errorf("class=%q: invalid attributes [class tenant node]", d.Class)
+	}
+
+	return nil
+}
 
 // // ToDistributed is used just for backward compatibility with the old version.
 // func (d *BackupDescriptor) ToDistributed() *DistributedBackupDescriptor {

@@ -110,6 +110,38 @@ func (db *DB) OffloadDescriptors(ctx context.Context, id string, class string, t
 	return ds
 }
 
+func (db *DB) ReleaseOffload(ctx context.Context, id, class, tenant string) (err error) {
+	fields := logrus.Fields{
+		"op":     "release_offload",
+		"class":  class,
+		"tenant": tenant,
+		"id":     id,
+	}
+	db.logger.WithFields(fields).Debug("starting")
+	begin := time.Now()
+	defer func() {
+		l := db.logger.WithFields(fields).WithField("took", time.Since(begin))
+		if err != nil {
+			l.Error(err)
+			return
+		}
+		l.Debug("finish")
+	}()
+
+	idx := db.GetIndex(schema.ClassName(class))
+	if idx == nil {
+		err = fmt.Errorf("release offload: class %v doesn't exist any more", class)
+		return
+	}
+	shard := idx.shards.Load(tenant)
+	if shard == nil {
+		err = fmt.Errorf("release offload: tenant %v doesn't exist any more", tenant)
+		return
+	}
+	err = shard.releaseOffload(ctx, id, class, tenant)
+	return
+}
+
 func (db *DB) ShardsBackup(
 	ctx context.Context, bakID, class string, shards []string,
 ) (_ backup.ClassDescriptor, err error) {
@@ -367,7 +399,7 @@ func (i *Index) marshalShardingState() ([]byte, error) {
 func (i *Index) marshalSchema() ([]byte, error) {
 	schema := i.getSchema.GetSchemaSkipAuth()
 
-	b, err := schema.GetClass(i.Config.ClassName).MarshalBinary()
+	b, err := schema.GetClass(string(i.Config.ClassName)).MarshalBinary()
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal schema")
 	}

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/offload"
 )
@@ -135,9 +134,9 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 	meta, err := s.validateRestoreRequest(ctx, store, req)
 	if err != nil {
 		if errors.Is(err, errMetaNotFound) {
-			return nil, backup.NewErrNotFound(err)
+			return nil, offload.NewErrNotFound(err)
 		}
-		return nil, backup.NewErrUnprocessable(err)
+		return nil, offload.NewErrUnprocessable(err)
 	}
 	status := string(offload.Started)
 	data := &models.OnloadResponse{
@@ -157,9 +156,9 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 	}
 	err = s.onloader.Onload(ctx, store, &rReq, meta)
 	if err != nil {
-		status = string(backup.Failed)
+		status = string(offload.Failed)
 		data.Error = err.Error()
-		return nil, backup.NewErrUnprocessable(err)
+		return nil, offload.NewErrUnprocessable(err)
 	}
 
 	data.Status = &status
@@ -261,7 +260,7 @@ func coordBackend(provider OffloadBackendProvider, backend, id string) (coordSto
 // 	return classes, nil
 // }
 
-func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore, req *OffloadRequest) (*offload.DistributedOffloadDescriptor, error) {
+func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore, req *OffloadRequest) (*offload.OffloadDistributedDescriptor, error) {
 	// if !store.b.IsExternal() && s.restorer.nodeResolver.NodeCount() > 1 {
 	// 	return nil, errLocalBackendDBRO
 	// }
@@ -274,7 +273,7 @@ func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore
 	destPath := store.HomeDir()
 	meta, err := store.Meta(ctx, GlobalOffloadFile)
 	if err != nil {
-		notFoundErr := backup.ErrNotFound{}
+		notFoundErr := offload.ErrNotFound{}
 		if errors.As(err, &notFoundErr) {
 			return nil, fmt.Errorf("backup id %q %q does not exist: %v: %w", req.Class, req.Tenant, notFoundErr, errMetaNotFound)
 		}
@@ -307,7 +306,7 @@ func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore
 	// }
 	if len(req.NodeMapping) > 0 {
 		meta.NodeMapping = req.NodeMapping
-		meta.ApplyNodeMapping()
+		// meta.ApplyNodeMapping()
 	}
 	return meta, nil
 }

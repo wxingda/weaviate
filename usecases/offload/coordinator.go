@@ -97,7 +97,7 @@ type coordinator struct {
 
 	// state
 	Participants map[string]participantStatus
-	descriptor   *offload.DistributedOffloadDescriptor
+	descriptor   *offload.OffloadDistributedDescriptor
 	shardSyncChan
 	// chans map[string]shardSyncChan
 
@@ -140,7 +140,7 @@ func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Reques
 		return fmt.Errorf("offload %s already in progress", prevID)
 	}
 
-	c.descriptor = &offload.DistributedOffloadDescriptor{
+	c.descriptor = &offload.OffloadDistributedDescriptor{
 		StartedAt:     time.Now().UTC(),
 		Status:        offload.Started,
 		ID:            req.ID,
@@ -194,7 +194,7 @@ func (c *coordinator) Onload(
 	ctx context.Context,
 	store coordStore,
 	req *Request,
-	desc *offload.DistributedOffloadDescriptor,
+	desc *offload.OffloadDistributedDescriptor,
 ) error {
 	req.Method = OpRestore
 	// make sure there is no active backup
