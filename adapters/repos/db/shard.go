@@ -22,6 +22,7 @@ import (
 	"time"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/entities/offload"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -162,10 +163,7 @@ type ShardLike interface {
 
 	Metrics() *Metrics
 
-	// A thread-safe counter that goes up any time there is activity on this
-	// shard. The absolute value has no meaning, it's only purpose is to compare
-	// the previous value to the current value.
-	Activity() int32
+	offloadDescriptor(ctx context.Context, offloadId string, desc *offload.ShardDescriptor) error
 }
 
 // Shard is the smallest completely-contained index unit. A shard manages
@@ -212,14 +210,7 @@ type Shard struct {
 	cycleCallbacks *shardCycleCallbacks
 	bitmapFactory  *roaringset.BitmapFactory
 
-	activityTracker atomic.Int32
-
-	// indicates whether shard is shut down or dropped (or ongoing)
-	shut bool
-	// indicates whether shard in being used at the moment (e.g. write request)
-	inUseCounter atomic.Int64
-	// allows concurrent shut read/write
-	shutdownLock *sync.RWMutex
+	ongoingOffload atomic.Pointer[string]
 }
 
 func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,

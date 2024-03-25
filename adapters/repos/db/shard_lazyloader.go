@@ -18,6 +18,9 @@ import (
 	"os"
 	"sync"
 
+	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/entities/offload"
+
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
 	"github.com/weaviate/weaviate/adapters/repos/db/indexcheckpoint"
@@ -621,17 +624,23 @@ func (l *LazyLoadShard) isLoaded() bool {
 	return l.loaded
 }
 
-func (l *LazyLoadShard) Activity() int32 {
-	var loaded bool
-	l.mutex.Lock()
-	loaded = l.loaded
-	l.mutex.Unlock()
+// func (l *LazyLoadShard) initOngoingOffload(id string) error {
+// 	if err := l.Load(context.Background()); err != nil {
+// 		return err
+// 	}
+// 	return l.shard.initOngoingOffload(id)
+// }
 
-	if !loaded {
-		// don't force-load the shard, just report the same number every time, so
-		// the caller can figure out there was no activity
-		return 0
+// func (l *LazyLoadShard) resetOngoingOffload() {
+// 	l.mustLoad()
+// 	l.shard.resetOngoingOffload()
+// }
+
+func (l *LazyLoadShard) offloadDescriptor(ctx context.Context, offloadId string,
+	desc *offload.ShardDescriptor,
+) error {
+	if err := l.Load(ctx); err != nil {
+		return err
 	}
-
-	return l.shard.Activity()
+	return l.shard.offloadDescriptor(ctx, offloadId, desc)
 }

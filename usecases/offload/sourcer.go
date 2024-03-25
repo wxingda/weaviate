@@ -15,6 +15,7 @@ import (
 	"context"
 
 	"github.com/weaviate/weaviate/entities/backup"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 // Sourcer represents the source of artifacts used in the backup
@@ -34,6 +35,9 @@ type Sourcer interface { // implemented by the index
 	// BackupDescriptors acquires resources so that a call to ReleaseBackup() is mandatory to free acquired resources.
 	BackupDescriptors(_ context.Context, bakid string, classes []string,
 	) <-chan backup.ClassDescriptor
+
+	OffloadDescriptors(_ context.Context, id string, class string, tenant string,
+	) <-chan offload.ShardDescriptor
 
 	// ClassExists checks whether a class exits or not
 	ClassExists(name string) bool

@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/entities/offload"
+	"github.com/weaviate/weaviate/entities/storagestate"
 
 	"github.com/weaviate/weaviate/entities/backup"
 )
@@ -88,6 +90,48 @@ func (s *Shard) ListBackupFiles(ctx context.Context, ret *backup.ShardDescriptor
 	return nil
 }
 
+func (s *Shard) ListOffloadFiles(ctx context.Context, desc *offload.ShardDescriptor) error {
+	files := make([]string, 0, 32)
+
+	for errFileType, filename := range map[string]string{
+		"docid counter path":      s.counter.FileName(),
+		"proplength tracker path": s.GetPropertyLengthTracker().FileName(),
+		"shard version path":      s.versioner.path,
+	} {
+		file, err := filepath.Rel(s.index.Config.RootPath, filename)
+		if err != nil {
+			return fmt.Errorf("%s: %w", errFileType, err)
+		}
+		files = append(files, file)
+	}
+
+	storeFiles, err := s.store.ListFiles(ctx, s.index.Config.RootPath)
+	if err != nil {
+		return err
+	}
+	files = append(files, storeFiles...)
+
+	if s.hasTargetVectors() {
+		for targetVector, vectorIndex := range s.vectorIndexes {
+			vectorFiles, err := vectorIndex.ListFiles(ctx, s.index.Config.RootPath)
+			if err != nil {
+				return fmt.Errorf("list files of vector %q: %w", targetVector, err)
+			}
+			files = append(files, vectorFiles...)
+		}
+	} else {
+		vectorFiles, err := s.vectorIndex.ListFiles(ctx, s.index.Config.RootPath)
+		if err != nil {
+			return err
+		}
+		files = append(files, vectorFiles...)
+	}
+
+	desc.Node = s.nodeName()
+	desc.Files = files
+	return nil
+}
+
 func (s *Shard) resumeMaintenanceCycles(ctx context.Context) error {
 	g := enterrors.NewErrorGroupWrapper(s.index.logger)
 
@@ -142,4 +186,58 @@ func (s *Shard) nodeName() string {
 	node, _ := s.index.getSchema.ShardOwner(
 		s.index.Config.ClassName.String(), s.name)
 	return node
+}
+
+// TODO AL is status necessary?
+func (s *Shard) initOngoingOffload(offloadId string) error {
+	if !s.ongoingOffload.CompareAndSwap(nil, &offloadId) {
+		return fmt.Errorf(
+			"cannot offload tenant, offload ‘%s’ is not yet finished, this "+
+				"means its contents have not yet been fully copied to its destination, "+
+				"try again later", offloadId)
+	}
+	return nil
+}
+
+// TODO AL is status necessary?
+func (s *Shard) resetOngoingOffload() {
+	s.ongoingOffload.Store(nil)
+}
+
+func (s *Shard) offloadDescriptor(ctx context.Context, offloadId string, desc *offload.ShardDescriptor) (err error) {
+	// set shard to readolny
+	if _, err := s.compareAndSwapStatus(storagestate.StatusReady.String(), storagestate.StatusReadOnly.String()); err != nil {
+		return err
+	}
+
+	// prevent parallel backup
+	s.index.backupMutex.RLock()
+	if err := s.initOngoingOffload(offloadId); err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			go func() {
+				if err := s.resumeMaintenanceCycles(ctx); err != nil {
+					s.index.logger.
+						WithField("shard", s.name).
+						WithField("op", "resume_maintenance").
+						Error(err)
+				}
+				s.resetOngoingOffload()
+				s.index.backupMutex.RUnlock()
+				s.compareAndSwapStatus(storagestate.StatusReadOnly.String(), storagestate.StatusReady.String())
+			}()
+		}
+	}()
+
+	if err = s.BeginBackup(ctx); err != nil {
+		return fmt.Errorf("pause compaction and flush: %w", err)
+	}
+	if err = s.ListOffloadFiles(ctx, desc); err != nil {
+		return fmt.Errorf("list shard %v files: %w", s.name, err)
+	}
+
+	return nil
 }

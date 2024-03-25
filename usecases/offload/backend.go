@@ -59,7 +59,7 @@ const (
 	// GlobalBackupFile used by coordinator to store its metadata
 	GlobalOffloadFile = "offload_config.json"
 	GlobalOnloadFile  = "onload_config.json"
-	_TempDirectory    = ".backup.tmp"
+	_TempDirectory    = ".onload.tmp"
 )
 
 var _NUMCPU = runtime.NumCPU()
@@ -144,7 +144,7 @@ func (s *nodeStore) Meta(ctx context.Context, backupID string, adjustBasePath bo
 }
 
 // meta marshals and uploads metadata
-func (s *nodeStore) PutMeta(ctx context.Context, desc *backup.BackupDescriptor) error {
+func (s *nodeStore) PutMeta(ctx context.Context, desc *offload.OffloadNodeDescriptor) error {
 	return s.putMeta(ctx, OffloadFile, desc)
 }
 
@@ -153,33 +153,31 @@ type coordStore struct {
 }
 
 // PutMeta puts coordinator's global metadata into object store
-func (s *coordStore) PutMeta(ctx context.Context, filename string, desc *offload.DistributedOffloadDescriptor) error {
+func (s *coordStore) PutMeta(ctx context.Context, filename string, desc *offload.OffloadDistributedDescriptor) error {
 	return s.putMeta(ctx, filename, desc)
 }
 
 // Meta gets coordinator's global metadata from object store
-func (s *coordStore) Meta(ctx context.Context, filename string) (*offload.DistributedOffloadDescriptor, error) {
-	var result offload.DistributedOffloadDescriptor
+func (s *coordStore) Meta(ctx context.Context, filename string) (*offload.OffloadDistributedDescriptor, error) {
+	var result offload.OffloadDistributedDescriptor
 	err := s.meta(ctx, filename, &result)
 	return &result, err
 }
 
 // uploader uploads backup artifacts. This includes db files and metadata
 type uploader struct {
-	sourcer  Sourcer
-	backend  nodeStore
-	backupID string
+	sourcer Sourcer
+	backend nodeStore
 	zipConfig
-	setStatus func(st backup.Status)
+	setStatus func(st offload.Status)
 	log       logrus.FieldLogger
 }
 
 func newUploader(sourcer Sourcer, backend nodeStore,
-	backupID string, setstatus func(st backup.Status), l logrus.FieldLogger,
+	setstatus func(st offload.Status), l logrus.FieldLogger,
 ) *uploader {
 	return &uploader{
 		sourcer, backend,
-		backupID,
 		newZipConfig(Compression{
 			Level:         DefaultCompression,
 			CPUPercentage: DefaultCPUPercentage,
@@ -196,10 +194,10 @@ func (u *uploader) withCompression(cfg zipConfig) *uploader {
 }
 
 // all uploads all files in addition to the metadata file
-func (u *uploader) all(ctx context.Context, classes []string, desc *backup.BackupDescriptor) (err error) {
-	u.setStatus(backup.Transferring)
-	desc.Status = string(backup.Transferring)
-	ch := u.sourcer.BackupDescriptors(ctx, desc.ID, classes)
+func (u *uploader) all(ctx context.Context, class string, tenant string, desc *offload.OffloadNodeDescriptor) (err error) {
+	u.setStatus(offload.Transferring)
+	desc.Status = string(offload.Transferring)
+	shardsCh := u.sourcer.OffloadDescriptors(ctx, desc.ID, class, tenant)
 	defer func() {
 		//  make sure context is not cancelled when uploading metadata
 		ctx := context.Background()
@@ -209,35 +207,38 @@ func (u *uploader) all(ctx context.Context, classes []string, desc *backup.Backu
 		} else {
 			u.log.Info("start uploading meta data")
 			if err = u.backend.PutMeta(ctx, desc); err != nil {
-				desc.Status = string(backup.Transferred)
+				desc.Status = string(offload.Transferred)
 			}
-			u.setStatus(backup.Success)
+			u.setStatus(offload.Success)
 			u.log.Info("finish uploading meta data")
 		}
 	}()
 Loop:
+	// TODO AL one for now
 	for {
 		select {
-		case cdesc, ok := <-ch:
+		case shardDesc, ok := <-shardsCh:
 			if !ok {
 				break Loop // we are done
 			}
-			if cdesc.Error != nil {
-				return cdesc.Error
+			if shardDesc.Error != nil {
+				return shardDesc.Error
 			}
-			u.log.WithField("class", cdesc.Name).Info("start uploading files")
-			if err := u.class(ctx, desc.ID, &cdesc); err != nil {
+
+			
+			u.log.WithField("class", shardDesc).Info("start uploading files")
+			if err := u.class(ctx, desc.ID, &shardDesc); err != nil {
 				return err
 			}
-			desc.Classes = append(desc.Classes, cdesc)
-			u.log.WithField("class", cdesc.Name).Info("finish uploading files")
+			desc.Classes = append(desc.Classes, shardDesc)
+			u.log.WithField("class", shardDesc.Name).Info("finish uploading files")
 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-	u.setStatus(backup.Transferred)
-	desc.Status = string(backup.Success)
+	u.setStatus(offload.Transferred)
+	desc.Status = string(offload.Success)
 	return nil
 }
 

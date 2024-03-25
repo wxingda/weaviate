@@ -21,6 +21,7 @@ import (
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/modulecapabilities"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 // Version of backup structure
@@ -58,7 +59,7 @@ type Status struct {
 	Path        string
 	StartedAt   time.Time
 	CompletedAt time.Time
-	Status      backup.Status
+	Status      offload.Status
 	Err         string
 }
 
@@ -159,10 +160,10 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 
 	switch req.Method {
 	case OpCreate:
-		if err := m.backupper.sourcer.Backupable(ctx, req.Classes); err != nil {
-			ret.Err = err.Error()
-			return ret
-		}
+		// if err := m.backupper.sourcer.Backupable(ctx, req.Classes); err != nil {
+		// 	ret.Err = err.Error()
+		// 	return ret
+		// }
 		if err = store.Initialize(ctx); err != nil {
 			ret.Err = fmt.Sprintf("init uploader: %v", err)
 			return ret
@@ -228,7 +229,7 @@ func (m *Handler) OnStatus(ctx context.Context, req *StatusRequest) *StatusRespo
 		st, err := m.backupper.OnStatus(ctx, req)
 		ret.Status = st.Status
 		if err != nil {
-			ret.Status = backup.Failed
+			ret.Status = offload.Failed
 			ret.Err = err.Error()
 		}
 	case OpRestore:
@@ -236,13 +237,13 @@ func (m *Handler) OnStatus(ctx context.Context, req *StatusRequest) *StatusRespo
 		ret.Status = st.Status
 		ret.Err = st.Err
 		if err != nil {
-			ret.Status = backup.Failed
+			ret.Status = offload.Failed
 			ret.Err = err.Error()
 		} else if st.Err != "" {
 			ret.Err = st.Err
 		}
 	default:
-		ret.Status = backup.Failed
+		ret.Status = offload.Failed
 		ret.Err = fmt.Sprintf("%v: %s", errUnknownOp, req.Method)
 	}
 
