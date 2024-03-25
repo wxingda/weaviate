@@ -18,9 +18,11 @@ import (
 	"os"
 	"path"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/entities/offload"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -153,6 +155,8 @@ type ShardLike interface {
 	hasGeoIndex() bool
 
 	Metrics() *Metrics
+
+	offloadDescriptor(ctx context.Context, offloadId string, desc *offload.ShardDescriptor) error
 }
 
 // Shard is the smallest completely-contained index unit. A shard manages
@@ -198,6 +202,8 @@ type Shard struct {
 
 	cycleCallbacks *shardCycleCallbacks
 	bitmapFactory  *roaringset.BitmapFactory
+
+	ongoingOffload atomic.Pointer[string]
 }
 
 func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,

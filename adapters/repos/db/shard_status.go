@@ -12,6 +12,7 @@
 package db
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -41,7 +42,7 @@ func (s *Shard) compareAndSwapStatus(old, new string) (storagestate.Status, erro
 	defer s.statusLock.Unlock()
 
 	if s.status.String() != old {
-		return s.status, nil
+		return s.status, fmt.Errorf("previous status %q different than expected %q", s.status, old)
 	}
 
 	return s.status, s.updateStatusUnlocked(new)

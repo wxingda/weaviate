@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/entities/offload"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/weaviate/weaviate/adapters/repos/db/indexcheckpoint"
@@ -600,4 +601,25 @@ func (l *LazyLoadShard) isLoaded() bool {
 	defer l.mutex.Unlock()
 
 	return l.loaded
+}
+
+// func (l *LazyLoadShard) initOngoingOffload(id string) error {
+// 	if err := l.Load(context.Background()); err != nil {
+// 		return err
+// 	}
+// 	return l.shard.initOngoingOffload(id)
+// }
+
+// func (l *LazyLoadShard) resetOngoingOffload() {
+// 	l.mustLoad()
+// 	l.shard.resetOngoingOffload()
+// }
+
+func (l *LazyLoadShard) offloadDescriptor(ctx context.Context, offloadId string,
+	desc *offload.ShardDescriptor,
+) error {
+	if err := l.Load(ctx); err != nil {
+		return err
+	}
+	return l.shard.offloadDescriptor(ctx, offloadId, desc)
 }
