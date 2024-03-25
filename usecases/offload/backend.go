@@ -24,12 +24,10 @@ import (
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/modulecapabilities"
 	"github.com/weaviate/weaviate/entities/offload"
-	"github.com/weaviate/weaviate/usecases/monitoring"
 )
 
 // TODO adjust or make configurable
@@ -127,18 +125,18 @@ type nodeStore struct {
 // Meta gets meta data using standard path or deprecated old path
 //
 // adjustBasePath: sets the base path to the old path if the backup has been created prior to v1.17.
-func (s *nodeStore) Meta(ctx context.Context, backupID string, adjustBasePath bool) (*backup.BackupDescriptor, error) {
-	var result backup.BackupDescriptor
+func (s *nodeStore) Meta(ctx context.Context) (*offload.OffloadNodeDescriptor, error) {
+	var result offload.OffloadNodeDescriptor
 	err := s.meta(ctx, OffloadFile, &result)
-	if err != nil {
-		cs := &objStore{s.b, backupID} // for backward compatibility
-		if err := cs.meta(ctx, OffloadFile, &result); err == nil {
-			if adjustBasePath {
-				s.objStore.BasePath = backupID
-			}
-			return &result, nil
-		}
-	}
+	// if err != nil {
+	// 	cs := &objStore{s.b, backupID} // for backward compatibility
+	// 	if err := cs.meta(ctx, OffloadFile, &result); err == nil {
+	// 		if adjustBasePath {
+	// 			s.objStore.BasePath = backupID
+	// 		}
+	// 		return &result, nil
+	// 	}
+	// }
 
 	return &result, err
 }
@@ -198,18 +196,21 @@ func (u *uploader) all(ctx context.Context, class string, tenant string, desc *o
 	u.setStatus(offload.Transferring)
 	desc.Status = string(offload.Transferring)
 	shardsCh := u.sourcer.OffloadDescriptors(ctx, desc.ID, class, tenant)
+
 	defer func() {
 		//  make sure context is not cancelled when uploading metadata
 		ctx := context.Background()
 		if err != nil {
 			desc.Error = err.Error()
+			desc.Status = string(offload.Failed)
+			u.setStatus(offload.Failed)
 			err = fmt.Errorf("upload %w: %v", err, u.backend.PutMeta(ctx, desc))
 		} else {
 			u.log.Info("start uploading meta data")
-			if err = u.backend.PutMeta(ctx, desc); err != nil {
-				desc.Status = string(offload.Transferred)
+			if err = u.backend.PutMeta(ctx, desc); err == nil {
+				desc.Status = string(offload.Success)
+				u.setStatus(offload.Success)
 			}
-			u.setStatus(offload.Success)
 			u.log.Info("finish uploading meta data")
 		}
 	}()
@@ -222,49 +223,56 @@ Loop:
 				break Loop // we are done
 			}
 			if shardDesc.Error != nil {
-				return shardDesc.Error
+				err = shardDesc.Error
+				desc.Error = err.Error()
+				return
 			}
 
-			
-			u.log.WithField("class", shardDesc).Info("start uploading files")
-			if err := u.class(ctx, desc.ID, &shardDesc); err != nil {
-				return err
+			desc.Files = shardDesc.Files
+			desc.Node = shardDesc.Node
+
+			u.log.WithField("id", desc.ID).Info("start uploading files")
+			if err = u.class(ctx, desc); err != nil {
+				return
 			}
-			desc.Classes = append(desc.Classes, shardDesc)
-			u.log.WithField("class", shardDesc.Name).Info("finish uploading files")
+			u.log.WithField("id", desc.ID).Info("finish uploading files")
 
 		case <-ctx.Done():
-			return ctx.Err()
+			err = ctx.Err()
+			return
 		}
 	}
 	u.setStatus(offload.Transferred)
-	desc.Status = string(offload.Success)
+	desc.Status = string(offload.Transferred)
 	return nil
 }
 
 // class uploads one class
-func (u *uploader) class(ctx context.Context, id string, desc *backup.ClassDescriptor) (err error) {
-	classLabel := desc.Name
-	if monitoring.GetMetrics().Group {
-		classLabel = "n/a"
-	}
-	metric, err := monitoring.GetMetrics().BackupStoreDurations.GetMetricWithLabelValues(getType(u.backend.b), classLabel)
-	if err == nil {
-		timer := prometheus.NewTimer(metric)
-		defer timer.ObserveDuration()
-	}
+func (u *uploader) class(ctx context.Context, desc *offload.OffloadNodeDescriptor) (err error) {
+	// classLabel := desc.Name
+	// if monitoring.GetMetrics().Group {
+	// 	classLabel = "n/a"
+	// }
+	// metric, err := monitoring.GetMetrics().BackupStoreDurations.GetMetricWithLabelValues(getType(u.backend.b), classLabel)
+	// if err == nil {
+	// 	timer := prometheus.NewTimer(metric)
+	// 	defer timer.ObserveDuration()
+	// }
 	defer func() {
 		// backups need to be released anyway
-		go u.sourcer.ReleaseBackup(context.Background(), id, desc.Name)
+		go u.sourcer.ReleaseOffload(context.Background(), desc.ID, desc.Class, desc.Tenant)
 	}()
+
 	ctx, cancel := context.WithTimeout(ctx, storeTimeout)
 	defer cancel()
-	nShards := len(desc.Shards)
+
+	// TODO AL shards number (multi tenants)
+	nShards := 1
 	if nShards == 0 {
 		return nil
 	}
 
-	desc.Chunks = make(map[int32][]string, 1+nShards/2)
+	// desc.Chunks = make(map[int32][]string, 1+nShards/2)
 	var (
 		hasJobs   atomic.Bool
 		lastChunk = int32(0)
@@ -276,8 +284,8 @@ func (u *uploader) class(ctx context.Context, id string, desc *backup.ClassDescr
 	hasJobs.Store(nShards > 0)
 
 	// jobs produces work for the processor
-	jobs := func(xs []*backup.ShardDescriptor) <-chan *backup.ShardDescriptor {
-		sendCh := make(chan *backup.ShardDescriptor)
+	jobs := func(xs []*offload.OffloadNodeDescriptor) <-chan *offload.OffloadNodeDescriptor {
+		sendCh := make(chan *offload.OffloadNodeDescriptor)
 		f := func() {
 			defer close(sendCh)
 			defer hasJobs.Store(false)
@@ -298,7 +306,7 @@ func (u *uploader) class(ctx context.Context, id string, desc *backup.ClassDescr
 	}
 
 	// processor
-	processor := func(nWorker int, sender <-chan *backup.ShardDescriptor) <-chan chuckShards {
+	processor := func(nWorker int, sender <-chan *offload.OffloadNodeDescriptor) <-chan chuckShards {
 		eg, ctx := enterrors.NewErrorGroupWithContextWrapper(u.log, ctx)
 		eg.SetLimit(nWorker)
 		recvCh := make(chan chuckShards, nWorker)
@@ -312,7 +320,7 @@ func (u *uploader) class(ctx context.Context, id string, desc *backup.ClassDescr
 					}
 					for hasJobs.Load() {
 						chunk := atomic.AddInt32(&lastChunk, 1)
-						shards, err := u.compress(ctx, desc.Name, chunk, sender)
+						shards, err := u.compress(ctx, chunk, sender)
 						if err != nil {
 							return err
 						}
@@ -329,8 +337,10 @@ func (u *uploader) class(ctx context.Context, id string, desc *backup.ClassDescr
 		return recvCh
 	}
 
-	for x := range processor(nWorker, jobs(desc.Shards)) {
-		desc.Chunks[x.chunk] = x.shards
+	for x := range processor(nWorker, jobs([]*offload.OffloadNodeDescriptor{desc})) {
+		// TODO AL remove
+		fmt.Printf("%v\n", x)
+		// desc.Chunks[x.chunk] = x.shards
 	}
 	return
 }
@@ -341,12 +351,11 @@ type chuckShards struct {
 }
 
 func (u *uploader) compress(ctx context.Context,
-	class string, // class name
 	chunk int32, // chunk index
-	ch <-chan *backup.ShardDescriptor, // chan of shards
+	ch <-chan *offload.OffloadNodeDescriptor, // chan of shards
 ) ([]string, error) {
 	var (
-		chunkKey = chunkKey(class, chunk)
+		chunkKey = chunkKey(chunk)
 		shards   = make([]string, 0, 10)
 		// add tolerance to enable better optimization of the chunk size
 		maxSize = int64(u.ChunkSize + u.ChunkSize/20) // size + 5%
@@ -359,9 +368,9 @@ func (u *uploader) compress(ctx context.Context,
 			if _, err := zip.WriteShard(ctx, shard); err != nil {
 				return err
 			}
-			shard.Chunk = chunk
-			shards = append(shards, shard.Name)
-			shard.ClearTemporary()
+			// shard.Chunk = chunk
+			// shards = append(shards, shard.Name)
+			// shard.ClearTemporary()
 
 			zip.gzw.Flush() // flush new shard
 			lastShardSize = zip.lastWritten() - lastShardSize
@@ -395,13 +404,12 @@ type fileWriter struct {
 	tempDir    string
 	destDir    string
 	movedFiles []string // files successfully moved to destination folder
-	compressed bool
 	GoPoolSize int
 	logger     logrus.FieldLogger
 }
 
 func newFileWriter(sourcer Sourcer, backend nodeStore,
-	backupID string, compressed bool, logger logrus.FieldLogger,
+	logger logrus.FieldLogger,
 ) *fileWriter {
 	destDir := backend.SourceDataPath()
 	return &fileWriter{
@@ -410,7 +418,6 @@ func newFileWriter(sourcer Sourcer, backend nodeStore,
 		destDir:    destDir,
 		tempDir:    path.Join(destDir, _TempDirectory),
 		movedFiles: make([]string, 0, 64),
-		compressed: compressed,
 		GoPoolSize: routinePoolSize(50),
 		logger:     logger,
 	}
@@ -422,67 +429,55 @@ func (fw *fileWriter) WithPoolPercentage(p int) *fileWriter {
 }
 
 // Write downloads files and put them in the destination directory
-func (fw *fileWriter) Write(ctx context.Context, desc *backup.ClassDescriptor) (rollback func() error, err error) {
-	if len(desc.Shards) == 0 { // nothing to copy
-		return func() error { return nil }, nil
-	}
-	classTempDir := path.Join(fw.tempDir, desc.Name)
+func (fw *fileWriter) Write(ctx context.Context, desc *offload.OffloadNodeDescriptor) (rollback func() error, err error) {
+	// if len(desc.Shards) == 0 { // nothing to copy
+	// 	return func() error { return nil }, nil
+	// }
+	shardTempDir := path.Join(fw.tempDir, desc.ID)
 	defer func() {
 		if err != nil {
-			if rerr := fw.rollBack(classTempDir); rerr != nil {
+			if rerr := fw.rollBack(); rerr != nil {
 				err = fmt.Errorf("%w: %v", err, rerr)
 			}
 		}
-		os.RemoveAll(classTempDir)
+		os.RemoveAll(shardTempDir)
 	}()
 
-	if err := fw.writeTempFiles(ctx, classTempDir, desc); err != nil {
+	if err := fw.writeTempFiles(ctx, shardTempDir, desc); err != nil {
 		return nil, fmt.Errorf("get files: %w", err)
 	}
-	if err := fw.moveAll(classTempDir); err != nil {
+	if err := fw.moveAll(shardTempDir); err != nil {
 		return nil, fmt.Errorf("move files to destination: %w", err)
 	}
-	return func() error { return fw.rollBack(classTempDir) }, nil
+	return fw.rollBack, nil
 }
 
 // writeTempFiles writes class files into a temporary directory
 // temporary directory path = d.tempDir/className
 // Function makes sure that created files will be removed in case of an error
-func (fw *fileWriter) writeTempFiles(ctx context.Context, classTempDir string, desc *backup.ClassDescriptor) (err error) {
-	if err := os.RemoveAll(classTempDir); err != nil {
-		return fmt.Errorf("remove %s: %w", classTempDir, err)
+func (fw *fileWriter) writeTempFiles(ctx context.Context, shardTempDir string, desc *offload.OffloadNodeDescriptor) (err error) {
+	if err := os.RemoveAll(shardTempDir); err != nil {
+		return fmt.Errorf("remove %s: %w", shardTempDir, err)
 	}
-	if err := os.MkdirAll(classTempDir, os.ModePerm); err != nil {
-		return fmt.Errorf("create temp class folder %s: %w", classTempDir, err)
+	if err := os.MkdirAll(shardTempDir, os.ModePerm); err != nil {
+		return fmt.Errorf("create temp class folder %s: %w", shardTempDir, err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// no compression processed as before
 	eg, ctx := enterrors.NewErrorGroupWithContextWrapper(fw.logger, ctx)
-	if !fw.compressed {
-		eg.SetLimit(2 * _NUMCPU)
-		for _, shard := range desc.Shards {
-			shard := shard
-			eg.Go(func() error { return fw.writeTempShard(ctx, shard, classTempDir) }, shard.Name)
-		}
-		return eg.Wait()
-	}
-
-	// source files are compressed
-
 	eg.SetLimit(fw.GoPoolSize)
-	for k := range desc.Chunks {
-		chunk := chunkKey(desc.Name, k)
-		eg.Go(func() error {
-			uz, w := NewUnzip(classTempDir)
-			go func() {
-				fw.backend.Read(ctx, chunk, w)
-			}()
-			_, err := uz.ReadChunk()
-			return err
-		})
-	}
+	// for k := range desc.Chunks {
+	chunk := chunkKey(1)
+	eg.Go(func() error {
+		uz, w := NewUnzip(shardTempDir)
+		go func() {
+			fw.backend.Read(ctx, chunk, w)
+		}()
+		_, err := uz.ReadChunk()
+		return err
+	})
+	// }
 	return eg.Wait()
 }
 
@@ -532,7 +527,7 @@ func (fw *fileWriter) moveAll(classTempDir string) (err error) {
 }
 
 // rollBack successfully written files
-func (fw *fileWriter) rollBack(classTempDir string) (err error) {
+func (fw *fileWriter) rollBack() (err error) {
 	// rollback successfully moved files
 	for _, fpath := range fw.movedFiles {
 		if rerr := os.RemoveAll(fpath); rerr != nil && err == nil {
@@ -542,8 +537,8 @@ func (fw *fileWriter) rollBack(classTempDir string) (err error) {
 	return err
 }
 
-func chunkKey(class string, id int32) string {
-	return fmt.Sprintf("%s/chunk-%d", class, id)
+func chunkKey(id int32) string {
+	return fmt.Sprintf("chunk-%d", id)
 }
 
 func routinePoolSize(percentage int) int {

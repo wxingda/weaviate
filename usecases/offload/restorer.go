@@ -21,10 +21,9 @@ import (
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
-	"github.com/weaviate/weaviate/usecases/monitoring"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 type restorer struct {
@@ -59,7 +58,7 @@ func newRestorer(node string, logger logrus.FieldLogger,
 
 func (r *restorer) restore(ctx context.Context,
 	req *Request,
-	desc *backup.BackupDescriptor,
+	desc *offload.OffloadNodeDescriptor,
 	store nodeStore,
 ) (CanCommitResponse, error) {
 	expiration := req.Duration
@@ -86,15 +85,15 @@ func (r *restorer) restore(ctx context.Context,
 		status := Status{
 			Path:      destPath,
 			StartedAt: time.Now().UTC(),
-			Status:    backup.Transferring,
+			Status:    offload.Transferring,
 		}
 		defer func() {
 			status.CompletedAt = time.Now().UTC()
 			if err == nil {
-				status.Status = backup.Success
+				status.Status = offload.Success
 			} else {
 				status.Err = err.Error()
-				status.Status = backup.Failed
+				status.Status = offload.Failed
 			}
 			r.restoreStatusMap.Store(basePath(req.Backend, req.ID), status)
 			r.lastOp.reset()
@@ -121,19 +120,16 @@ func (r *restorer) restore(ctx context.Context,
 }
 
 func (r *restorer) restoreAll(ctx context.Context,
-	desc *backup.BackupDescriptor, cpuPercentage int,
+	desc *offload.OffloadNodeDescriptor, cpuPercentage int,
 	store nodeStore, nodeMapping map[string]string,
 ) (err error) {
-	compressed := desc.Version > version1
-	r.lastOp.set(backup.Transferring)
-	for _, cdesc := range desc.Classes {
-		if err := r.restoreOne(ctx, desc.ID, &cdesc, compressed, cpuPercentage, store, nodeMapping); err != nil {
-			return fmt.Errorf("restore class %s: %w", cdesc.Name, err)
-		}
-		r.logger.WithField("action", "restore").
-			WithField("backup_id", desc.ID).
-			WithField("class", cdesc.Name).Info("successfully restored")
+	r.lastOp.set(offload.Transferring)
+	if err := r.restoreOne(ctx, desc, cpuPercentage, store, nodeMapping); err != nil {
+		return fmt.Errorf("restore id %s: %w", desc.ID, err)
 	}
+	r.logger.WithField("action", "restore").
+		WithField("id", desc.ID).
+		Info("successfully restored")
 	return nil
 }
 
@@ -146,35 +142,37 @@ func getType(myvar interface{}) string {
 }
 
 func (r *restorer) restoreOne(ctx context.Context,
-	backupID string, desc *backup.ClassDescriptor,
-	compressed bool, cpuPercentage int, store nodeStore, nodeMapping map[string]string,
+	desc *offload.OffloadNodeDescriptor,
+	cpuPercentage int, store nodeStore, nodeMapping map[string]string,
 ) (err error) {
-	classLabel := desc.Name
-	if monitoring.GetMetrics().Group {
-		classLabel = "n/a"
-	}
-	metric, err := monitoring.GetMetrics().BackupRestoreDurations.GetMetricWithLabelValues(getType(store.b), classLabel)
-	if err != nil {
-		timer := prometheus.NewTimer(metric)
-		defer timer.ObserveDuration()
-	}
+	// classLabel := desc.Name
+	// if monitoring.GetMetrics().Group {
+	// 	classLabel = "n/a"
+	// }
+	// metric, err := monitoring.GetMetrics().BackupRestoreDurations.GetMetricWithLabelValues(getType(store.b), classLabel)
+	// if err != nil {
+	// 	timer := prometheus.NewTimer(metric)
+	// 	defer timer.ObserveDuration()
+	// }
 
-	if r.sourcer.ClassExists(desc.Name) {
-		return fmt.Errorf("already exists")
-	}
-	fw := newFileWriter(r.sourcer, store, backupID, compressed, r.logger).
+	// TODO AL check shard exists?
+	// if r.sourcer.ClassExists(desc.Name) {
+	// 	return fmt.Errorf("already exists")
+	// }
+	fw := newFileWriter(r.sourcer, store, r.logger).
 		WithPoolPercentage(cpuPercentage)
 
 	rollback, err := fw.Write(ctx, desc)
+	_ = rollback
 	if err != nil {
 		return fmt.Errorf("write files: %w", err)
 	}
-	if err := r.schema.RestoreClass(ctx, desc, nodeMapping); err != nil {
-		if rerr := rollback(); rerr != nil {
-			r.logger.WithField("className", desc.Name).WithField("action", "rollback").Error(rerr)
-		}
-		return fmt.Errorf("restore schema: %w", err)
-	}
+	// if err := r.schema.RestoreClass(ctx, desc, nodeMapping); err != nil {
+	// 	if rerr := rollback(); rerr != nil {
+	// 		r.logger.WithField("className", desc.Name).WithField("action", "rollback").Error(rerr)
+	// 	}
+	// 	return fmt.Errorf("restore schema: %w", err)
+	// }
 	return nil
 }
 
@@ -195,36 +193,36 @@ func (r *restorer) status(backend, ID string) (Status, error) {
 	return istatus.(Status), nil
 }
 
-func (r *restorer) validate(ctx context.Context, store *nodeStore, req *Request) (*backup.BackupDescriptor, []string, error) {
+func (r *restorer) validate(ctx context.Context, store *nodeStore, req *Request) (*offload.OffloadNodeDescriptor, error) {
 	destPath := store.HomeDir()
-	meta, err := store.Meta(ctx, req.ID, true)
+	meta, err := store.Meta(ctx)
 	if err != nil {
-		nerr := backup.ErrNotFound{}
+		nerr := offload.ErrNotFound{}
 		if errors.As(err, &nerr) {
-			return nil, nil, fmt.Errorf("restorer cannot validate: %w: %q (%w)", errMetaNotFound, destPath, err)
+			return nil, fmt.Errorf("restorer cannot validate: %w: %q (%w)", errMetaNotFound, destPath, err)
 		}
-		return nil, nil, fmt.Errorf("find backup %s: %w", destPath, err)
+		return nil, fmt.Errorf("find backup %s: %w", destPath, err)
 	}
 	if meta.ID != req.ID {
-		return nil, nil, fmt.Errorf("wrong backup file: expected %q got %q", req.ID, meta.ID)
+		return nil, fmt.Errorf("wrong backup file: expected %q got %q", req.ID, meta.ID)
 	}
-	if meta.Status != string(backup.Success) {
+	if meta.Status != string(offload.Success) {
 		err = fmt.Errorf("invalid backup %s status: %s", destPath, meta.Status)
-		return nil, nil, err
+		return nil, err
 	}
-	if err := meta.Validate(meta.Version > version1); err != nil {
-		return nil, nil, fmt.Errorf("corrupted backup file: %w", err)
+	if err := meta.Validate(); err != nil {
+		return nil, fmt.Errorf("corrupted backup file: %w", err)
 	}
 	if v := meta.Version; v > Version {
-		return nil, nil, fmt.Errorf("%s: %s > %s", errMsgHigherVersion, v, Version)
+		return nil, fmt.Errorf("%s: %s > %s", errMsgHigherVersion, v, Version)
 	}
-	cs := meta.List()
-	if len(req.Classes) > 0 {
-		if first := meta.AllExist(req.Classes); first != "" {
-			err = fmt.Errorf("class %s doesn't exist in the backup, but does have %v: ", first, cs)
-			return nil, cs, err
-		}
-		meta.Include(req.Classes)
-	}
-	return meta, cs, nil
+	// cs := meta.List()
+	// if len(req.Classes) > 0 {
+	// 	if first := meta.AllExist(req.Classes); first != "" {
+	// 		err = fmt.Errorf("class %s doesn't exist in the backup, but does have %v: ", first, cs)
+	// 		return nil, cs, err
+	// 	}
+	// 	meta.Include(req.Classes)
+	// }
+	return meta, nil
 }

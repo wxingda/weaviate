@@ -241,3 +241,11 @@ func (s *Shard) offloadDescriptor(ctx context.Context, offloadId string, desc *o
 
 	return nil
 }
+
+func (s *Shard) releaseOffload(ctx context.Context, id, class, tenant string) error {
+	// do not resume maintenance cycles
+	// do not reset ongoing offload
+	s.index.backupMutex.RUnlock()
+	// do not change status
+	return nil
+}

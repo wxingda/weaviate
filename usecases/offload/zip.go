@@ -13,7 +13,6 @@ package offload
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -24,7 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/weaviate/weaviate/entities/backup"
+	"github.com/weaviate/weaviate/entities/offload"
 )
 
 // CompressionLevel represents supported compression level
@@ -72,27 +71,27 @@ func (z *zip) Close() error {
 }
 
 // WriteShard writes shard internal files including in memory files stored in sd
-func (z *zip) WriteShard(ctx context.Context, sd *backup.ShardDescriptor) (written int64, err error) {
+func (z *zip) WriteShard(ctx context.Context, sd *offload.OffloadNodeDescriptor) (written int64, err error) {
 	var n int64 // temporary written bytes
-	for _, x := range [3]struct {
-		relPath string
-		data    []byte
-		modTime time.Time
-	}{
-		{relPath: sd.DocIDCounterPath, data: sd.DocIDCounter},
-		{relPath: sd.PropLengthTrackerPath, data: sd.PropLengthTracker},
-		{relPath: sd.ShardVersionPath, data: sd.Version},
-	} {
-		info := vFileInfo{
-			name: filepath.Base(x.relPath),
-			size: len(x.data),
-		}
-		if n, err = z.writeOne(info, x.relPath, bytes.NewReader(x.data)); err != nil {
-			return written, err
-		}
-		written += n
+	// for _, x := range [3]struct {
+	// 	relPath string
+	// 	data    []byte
+	// 	modTime time.Time
+	// }{
+	// 	{relPath: sd.DocIDCounterPath, data: sd.DocIDCounter},
+	// 	{relPath: sd.PropLengthTrackerPath, data: sd.PropLengthTracker},
+	// 	{relPath: sd.ShardVersionPath, data: sd.Version},
+	// } {
+	// 	info := vFileInfo{
+	// 		name: filepath.Base(x.relPath),
+	// 		size: len(x.data),
+	// 	}
+	// 	if n, err = z.writeOne(info, x.relPath, bytes.NewReader(x.data)); err != nil {
+	// 		return written, err
+	// 	}
+	// 	written += n
 
-	}
+	// }
 
 	n, err = z.WriteRegulars(ctx, sd.Files)
 	written += n

@@ -644,3 +644,10 @@ func (l *LazyLoadShard) offloadDescriptor(ctx context.Context, offloadId string,
 	}
 	return l.shard.offloadDescriptor(ctx, offloadId, desc)
 }
+
+func (l *LazyLoadShard) releaseOffload(ctx context.Context, id, class, tenant string) error {
+	if err := l.Load(ctx); err != nil {
+		return err
+	}
+	return l.shard.releaseOffload(ctx, id, class, tenant)
+}

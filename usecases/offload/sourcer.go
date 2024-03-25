@@ -36,8 +36,9 @@ type Sourcer interface { // implemented by the index
 	BackupDescriptors(_ context.Context, bakid string, classes []string,
 	) <-chan backup.ClassDescriptor
 
-	OffloadDescriptors(_ context.Context, id string, class string, tenant string,
-	) <-chan offload.ShardDescriptor
+	OffloadDescriptors(_ context.Context, id, class, tenant string) <-chan offload.ShardDescriptor
+
+	ReleaseOffload(_ context.Context, id, class, tenant string) error
 
 	// ClassExists checks whether a class exits or not
 	ClassExists(name string) bool
