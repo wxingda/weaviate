@@ -207,8 +207,8 @@ func (u *uploader) all(ctx context.Context, class string, tenant string, desc *o
 			err = fmt.Errorf("upload %w: %v", err, u.backend.PutMeta(ctx, desc))
 		} else {
 			u.log.Info("start uploading meta data")
+			desc.Status = string(offload.Success)
 			if err = u.backend.PutMeta(ctx, desc); err == nil {
-				desc.Status = string(offload.Success)
 				u.setStatus(offload.Success)
 			}
 			u.log.Info("finish uploading meta data")
