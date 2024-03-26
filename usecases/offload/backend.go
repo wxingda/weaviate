@@ -225,6 +225,7 @@ Loop:
 			if shardDesc.Error != nil {
 				err = shardDesc.Error
 				desc.Error = err.Error()
+				desc.Node = shardDesc.Node
 				return
 			}
 

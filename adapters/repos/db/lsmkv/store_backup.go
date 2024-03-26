@@ -83,3 +83,16 @@ func (s *Store) FlushMemtables(ctx context.Context) error {
 	_, err := s.runJobOnBuckets(ctx, flushMemtable, nil)
 	return err
 }
+
+func (s *Store) FlushMemtablesIgnoreReadonly(ctx context.Context) error {
+	if err := s.cycleCallbacks.flushCallbacksCtrl.Deactivate(ctx); err != nil {
+		return errors.Wrap(err, "long-running memtable flush in progress")
+	}
+	defer s.cycleCallbacks.flushCallbacksCtrl.Activate()
+
+	flushMemtable := func(ctx context.Context, b *Bucket) (interface{}, error) {
+		return nil, b.FlushMemtableIgnoreReadonly()
+	}
+	_, err := s.runJobOnBuckets(ctx, flushMemtable, nil)
+	return err
+}

@@ -60,6 +60,42 @@ func (s *Shard) BeginBackup(ctx context.Context) (err error) {
 	return nil
 }
 
+// BeginBackup stops compaction, and flushing memtable and commit log to begin with the backup
+func (s *Shard) BeginOffload(ctx context.Context) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("pause compaction: %w", err)
+			if err2 := s.resumeMaintenanceCycles(ctx); err2 != nil {
+				err = fmt.Errorf("%w: resume maintenance: %v", err, err2)
+			}
+		}
+	}()
+	if err = s.store.PauseCompaction(ctx); err != nil {
+		return fmt.Errorf("pause compaction: %w", err)
+	}
+	if err = s.store.FlushMemtablesIgnoreReadonly(ctx); err != nil {
+		return fmt.Errorf("flush memtables: %w", err)
+	}
+	if err = s.cycleCallbacks.vectorCombinedCallbacksCtrl.Deactivate(ctx); err != nil {
+		return fmt.Errorf("pause vector maintenance: %w", err)
+	}
+	if err = s.cycleCallbacks.geoPropsCombinedCallbacksCtrl.Deactivate(ctx); err != nil {
+		return fmt.Errorf("pause geo props maintenance: %w", err)
+	}
+	if s.hasTargetVectors() {
+		for targetVector, vectorIndex := range s.vectorIndexes {
+			if err = vectorIndex.SwitchCommitLogs(ctx); err != nil {
+				return fmt.Errorf("switch commit logs of vector %q: %w", targetVector, err)
+			}
+		}
+	} else {
+		if err = s.vectorIndex.SwitchCommitLogs(ctx); err != nil {
+			return fmt.Errorf("switch commit logs: %w", err)
+		}
+	}
+	return nil
+}
+
 // ListBackupFiles lists all files used to backup a shard
 func (s *Shard) ListBackupFiles(ctx context.Context, ret *backup.ShardDescriptor) error {
 	var err error
@@ -127,7 +163,6 @@ func (s *Shard) ListOffloadFiles(ctx context.Context, desc *offload.ShardDescrip
 		files = append(files, vectorFiles...)
 	}
 
-	desc.Node = s.nodeName()
 	desc.Files = files
 	return nil
 }
@@ -205,6 +240,8 @@ func (s *Shard) resetOngoingOffload() {
 }
 
 func (s *Shard) offloadDescriptor(ctx context.Context, offloadId string, desc *offload.ShardDescriptor) (err error) {
+	desc.Node = s.nodeName()
+
 	// set shard to readolny
 	if _, err := s.compareAndSwapStatus(storagestate.StatusReady.String(), storagestate.StatusReadOnly.String()); err != nil {
 		return err
@@ -232,7 +269,7 @@ func (s *Shard) offloadDescriptor(ctx context.Context, offloadId string, desc *o
 		}
 	}()
 
-	if err = s.BeginBackup(ctx); err != nil {
+	if err = s.BeginOffload(ctx); err != nil {
 		return fmt.Errorf("pause compaction and flush: %w", err)
 	}
 	if err = s.ListOffloadFiles(ctx, desc); err != nil {
