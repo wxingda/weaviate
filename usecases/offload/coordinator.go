@@ -225,7 +225,7 @@ func (c *coordinator) Onload(
 	g := func() {
 		defer c.lastOp.reset()
 		ctx := context.Background()
-		c.commit(ctx, &statusReq, nodes, true)
+		c.commit(ctx, &statusReq, nodes, false)
 		logFields := logrus.Fields{"action": OpRestore, "backup_id": desc.ID}
 		if err := store.PutMeta(ctx, GlobalOnloadFile, c.descriptor); err != nil {
 			c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
