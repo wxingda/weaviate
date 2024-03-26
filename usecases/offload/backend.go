@@ -229,6 +229,7 @@ Loop:
 				return
 			}
 
+			desc.ParentDir = shardDesc.ParentDir
 			desc.Files = shardDesc.Files
 			desc.Node = shardDesc.Node
 

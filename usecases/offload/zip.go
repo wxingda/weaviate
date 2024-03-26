@@ -93,13 +93,13 @@ func (z *zip) WriteShard(ctx context.Context, sd *offload.OffloadNodeDescriptor)
 
 	// }
 
-	n, err = z.WriteRegulars(ctx, sd.Files)
+	n, err = z.WriteRegulars(ctx, sd.ParentDir, sd.Files)
 	written += n
 
 	return
 }
 
-func (z *zip) WriteRegulars(ctx context.Context, relPaths []string) (written int64, err error) {
+func (z *zip) WriteRegulars(ctx context.Context, parentDir string, relPaths []string) (written int64, err error) {
 	for _, relPath := range relPaths {
 		if filepath.Base(relPath) == ".DS_Store" {
 			continue
@@ -107,7 +107,7 @@ func (z *zip) WriteRegulars(ctx context.Context, relPaths []string) (written int
 		if err := ctx.Err(); err != nil {
 			return written, err
 		}
-		n, err := z.WriteRegular(relPath)
+		n, err := z.WriteRegular(filepath.Join(parentDir, relPath))
 		if err != nil {
 			return written, err
 		}
