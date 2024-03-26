@@ -226,10 +226,9 @@ func (d *OffloadDistributedDescriptor) ResetStatus() *OffloadDistributedDescript
 type ShardDescriptor struct {
 	// Tenant string   `json:"tenant"`
 	// Class  string   `json:"class"`
-	Node      string   `json:"node"`
-	ParentDir string   `json:"parentDir,omitempty"`
-	Files     []string `json:"files,omitempty"`
-	Error     error    `json:"-"`
+	Node  string   `json:"node"`
+	Files []string `json:"files,omitempty"`
+	Error error    `json:"-"`
 
 	// DocIDCounterPath      string `json:"docIdCounterPath,omitempty"`
 	// DocIDCounter          []byte `json:"docIdCounter,omitempty"`
@@ -288,11 +287,10 @@ type OffloadNodeDescriptor struct {
 	ServerVersion string `json:"serverVersion"`
 	Error         string `json:"error"`
 
-	Tenant    string   `json:"tenant"`
-	Class     string   `json:"class"`
-	Node      string   `json:"node"`
-	ParentDir string   `json:"parentDir,omitempty"`
-	Files     []string `json:"files,omitempty"`
+	Tenant string   `json:"tenant"`
+	Class  string   `json:"class"`
+	Node   string   `json:"node"`
+	Files  []string `json:"files,omitempty"`
 }
 
 // BackupDescriptor contains everything needed to completely restore a list of classes

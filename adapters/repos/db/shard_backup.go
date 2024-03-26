@@ -127,26 +127,21 @@ func (s *Shard) ListBackupFiles(ctx context.Context, ret *backup.ShardDescriptor
 }
 
 func (s *Shard) ListOffloadFiles(ctx context.Context, desc *offload.ShardDescriptor) error {
-	indexPath := s.index.path()
-	parentDir, err := filepath.Rel(s.index.Config.RootPath, indexPath)
-	if err != nil {
-		return fmt.Errorf("parent dir: %w", err)
-	}
-
+	rootPath := s.index.Config.RootPath
 	files := make([]string, 0, 32)
 	for errFileType, filename := range map[string]string{
 		"docid counter path":      s.counter.FileName(),
 		"proplength tracker path": s.GetPropertyLengthTracker().FileName(),
 		"shard version path":      s.versioner.path,
 	} {
-		file, err := filepath.Rel(indexPath, filename)
+		file, err := filepath.Rel(rootPath, filename)
 		if err != nil {
 			return fmt.Errorf("%s: %w", errFileType, err)
 		}
 		files = append(files, file)
 	}
 
-	storeFiles, err := s.store.ListFiles(ctx, indexPath)
+	storeFiles, err := s.store.ListFiles(ctx, rootPath)
 	if err != nil {
 		return err
 	}
@@ -154,21 +149,20 @@ func (s *Shard) ListOffloadFiles(ctx context.Context, desc *offload.ShardDescrip
 
 	if s.hasTargetVectors() {
 		for targetVector, vectorIndex := range s.vectorIndexes {
-			vectorFiles, err := vectorIndex.ListFiles(ctx, indexPath)
+			vectorFiles, err := vectorIndex.ListFiles(ctx, rootPath)
 			if err != nil {
 				return fmt.Errorf("list files of vector %q: %w", targetVector, err)
 			}
 			files = append(files, vectorFiles...)
 		}
 	} else {
-		vectorFiles, err := s.vectorIndex.ListFiles(ctx, indexPath)
+		vectorFiles, err := s.vectorIndex.ListFiles(ctx, rootPath)
 		if err != nil {
 			return err
 		}
 		files = append(files, vectorFiles...)
 	}
 
-	desc.ParentDir = parentDir
 	desc.Files = files
 	return nil
 }

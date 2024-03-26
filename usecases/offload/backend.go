@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -200,6 +201,7 @@ func (u *uploader) all(ctx context.Context, class string, tenant string, desc *o
 	defer func() {
 		//  make sure context is not cancelled when uploading metadata
 		ctx := context.Background()
+		desc.CompletedAt = time.Now().UTC()
 		if err != nil {
 			desc.Error = err.Error()
 			desc.Status = string(offload.Failed)
@@ -229,7 +231,6 @@ Loop:
 				return
 			}
 
-			desc.ParentDir = shardDesc.ParentDir
 			desc.Files = shardDesc.Files
 			desc.Node = shardDesc.Node
 
@@ -435,20 +436,21 @@ func (fw *fileWriter) Write(ctx context.Context, desc *offload.OffloadNodeDescri
 	// if len(desc.Shards) == 0 { // nothing to copy
 	// 	return func() error { return nil }, nil
 	// }
-	shardTempDir := path.Join(fw.tempDir, desc.ID)
+	classTempDir := path.Join(fw.tempDir, desc.ID)
 	defer func() {
 		if err != nil {
 			if rerr := fw.rollBack(); rerr != nil {
 				err = fmt.Errorf("%w: %v", err, rerr)
 			}
 		}
-		os.RemoveAll(shardTempDir)
+		// TODO AL fix: now only tenant dir of class/tenant path is removed
+		os.RemoveAll(classTempDir)
 	}()
 
-	if err := fw.writeTempFiles(ctx, shardTempDir, desc); err != nil {
+	if err := fw.writeTempFiles(ctx, classTempDir); err != nil {
 		return nil, fmt.Errorf("get files: %w", err)
 	}
-	if err := fw.moveAll(shardTempDir); err != nil {
+	if err := fw.moveAll(classTempDir); err != nil {
 		return nil, fmt.Errorf("move files to destination: %w", err)
 	}
 	return fw.rollBack, nil
@@ -457,12 +459,12 @@ func (fw *fileWriter) Write(ctx context.Context, desc *offload.OffloadNodeDescri
 // writeTempFiles writes class files into a temporary directory
 // temporary directory path = d.tempDir/className
 // Function makes sure that created files will be removed in case of an error
-func (fw *fileWriter) writeTempFiles(ctx context.Context, shardTempDir string, desc *offload.OffloadNodeDescriptor) (err error) {
-	if err := os.RemoveAll(shardTempDir); err != nil {
-		return fmt.Errorf("remove %s: %w", shardTempDir, err)
+func (fw *fileWriter) writeTempFiles(ctx context.Context, classTempDir string) (err error) {
+	if err := os.RemoveAll(classTempDir); err != nil {
+		return fmt.Errorf("remove %s: %w", classTempDir, err)
 	}
-	if err := os.MkdirAll(shardTempDir, os.ModePerm); err != nil {
-		return fmt.Errorf("create temp class folder %s: %w", shardTempDir, err)
+	if err := os.MkdirAll(classTempDir, os.ModePerm); err != nil {
+		return fmt.Errorf("create temp class folder %s: %w", classTempDir, err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -472,7 +474,7 @@ func (fw *fileWriter) writeTempFiles(ctx context.Context, shardTempDir string, d
 	// for k := range desc.Chunks {
 	chunk := chunkKey(1)
 	eg.Go(func() error {
-		uz, w := NewUnzip(shardTempDir)
+		uz, w := NewUnzip(classTempDir)
 		go func() {
 			fw.backend.Read(ctx, chunk, w)
 		}()
@@ -510,15 +512,29 @@ func (fw *fileWriter) writeTempShard(ctx context.Context, sd *backup.ShardDescri
 }
 
 // moveAll moves all files to the destination
-func (fw *fileWriter) moveAll(classTempDir string) (err error) {
-	files, err := os.ReadDir(classTempDir)
+func (fw *fileWriter) moveAll(tempPath string) (err error) {
+	classDirs, err := os.ReadDir(tempPath)
 	if err != nil {
-		return fmt.Errorf("read %s", classTempDir)
+		return fmt.Errorf("read %s", tempPath)
 	}
-	destDir := fw.destDir
-	for _, key := range files {
-		from := path.Join(classTempDir, key.Name())
-		to := path.Join(destDir, key.Name())
+	if len(classDirs) != 1 {
+		return fmt.Errorf("read %s: expected 1 dir, %d found", tempPath, len(classDirs))
+	}
+	classDir := classDirs[0]
+	if !classDir.IsDir() {
+		return fmt.Errorf("read %s: expected 1 dir, %s file found", tempPath, classDir.Name())
+	}
+
+	classPath := filepath.Join(tempPath, classDir.Name())
+	shardDirs, err := os.ReadDir(classPath)
+	if err != nil {
+		return fmt.Errorf("read %s", tempPath)
+	}
+
+	destPath := filepath.Join(fw.destDir, classDir.Name())
+	for _, key := range shardDirs {
+		from := path.Join(classPath, key.Name())
+		to := path.Join(destPath, key.Name())
 		if err := os.Rename(from, to); err != nil {
 			return fmt.Errorf("move %s %s: %w", from, to, err)
 		}
