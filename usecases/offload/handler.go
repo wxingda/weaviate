@@ -14,7 +14,6 @@ package offload
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -25,17 +24,12 @@ import (
 )
 
 // Version of backup structure
-const (
-	// Version > version1 support compression
-	Version = "2.0"
-	// version1 store plain files without compression
-	version1 = "1.0"
-)
+const Version = "1.0"
 
 // TODO error handling need to be implemented properly.
 // Current error handling is not idiomatic and relays on string comparisons which makes testing very brittle.
 
-var regExpID = regexp.MustCompile("^[a-z0-9_-]+$")
+// var regExpID = regexp.MustCompile("^[a-z0-9_-]+$")
 
 type OffloadBackendProvider interface {
 	BackupBackend(backend string) (modulecapabilities.BackupBackend, error)
@@ -250,12 +244,12 @@ func (m *Handler) OnStatus(ctx context.Context, req *StatusRequest) *StatusRespo
 	return &ret
 }
 
-func validateID(backupID string) error {
-	if !regExpID.MatchString(backupID) {
-		return fmt.Errorf("invalid backup id: allowed characters are lowercase, 0-9, _, -")
-	}
-	return nil
-}
+// func validateID(backupID string) error {
+// 	if !regExpID.MatchString(backupID) {
+// 		return fmt.Errorf("invalid backup id: allowed characters are lowercase, 0-9, _, -")
+// 	}
+// 	return nil
+// }
 
 func nodeBackend(node string, provider OffloadBackendProvider, backend, id string) (nodeStore, error) {
 	caps, err := provider.BackupBackend(backend)
