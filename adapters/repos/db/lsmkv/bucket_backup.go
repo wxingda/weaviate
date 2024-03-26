@@ -33,6 +33,10 @@ func (b *Bucket) FlushMemtable() error {
 		return errors.Wrap(storagestate.ErrStatusReadOnly, "flush memtable")
 	}
 
+	return b.FlushMemtableIgnoreReadonly()
+}
+
+func (b *Bucket) FlushMemtableIgnoreReadonly() error {
 	// this lock does not currently _need_ to be
 	// obtained, as the only other place that
 	// grabs this lock is the flush cycle, which
