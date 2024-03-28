@@ -111,8 +111,7 @@ func validateTenants(tenants []*models.Tenant) (validated []*models.Tenant, err 
 			err = uco.NewErrInvalidUserInput("tenant name at index %d: %s", i, msg)
 			return
 		}
-		_, found := uniq[requested.Name]
-		if !found {
+		if _, found := uniq[requested.Name]; !found {
 			uniq[requested.Name] = requested
 		}
 	}
@@ -130,23 +129,64 @@ func validateActivityStatuses(tenants []*models.Tenant, allowEmpty bool) error {
 
 	for _, tenant := range tenants {
 		switch status := tenant.ActivityStatus; status {
-		case models.TenantActivityStatusHOT, models.TenantActivityStatusCOLD:
+		case models.TenantActivityStatusHOT,
+			models.TenantActivityStatusCOLD,
+			models.TenantActivityStatusFROZEN:
 			// ok
-		case models.TenantActivityStatusWARM, models.TenantActivityStatusFROZEN:
+		case models.TenantActivityStatusWARM:
 			msgs = append(msgs, fmt.Sprintf(
 				"not yet supported activity status '%s' for tenant %q", status, tenant.Name))
 		default:
-			if status == "" && allowEmpty {
-				continue
+			if !(status == "" && allowEmpty) {
+				msgs = append(msgs, fmt.Sprintf(
+					"invalid activity status '%s' for tenant %q", status, tenant.Name))
 			}
-			msgs = append(msgs, fmt.Sprintf(
-				"invalid activity status '%s' for tenant %q", status, tenant.Name))
 		}
 	}
 
 	if len(msgs) != 0 {
 		return uco.NewErrInvalidUserInput(strings.Join(msgs, ", "))
 	}
+	return nil
+}
+
+func validateActivityStatusTransitions(tenants, existingTenants []*models.Tenant) error {
+	existingByName := make(map[string]*models.Tenant, len(existingTenants))
+	for _, existingTenant := range existingTenants {
+		existingByName[existingTenant.Name] = existingTenant
+	}
+
+	// key = to, value = from
+	allowedTransitions := map[string]map[string]struct{}{
+		models.TenantActivityStatusHOT: map[string]struct{}{
+			models.TenantActivityStatusFROZEN: struct{}{},
+			models.TenantActivityStatusCOLD:   struct{}{},
+			models.TenantActivityStatusHOT:    struct{}{},
+		},
+		models.TenantActivityStatusCOLD: map[string]struct{}{
+			models.TenantActivityStatusCOLD: struct{}{},
+			models.TenantActivityStatusHOT:  struct{}{},
+		},
+		models.TenantActivityStatusFROZEN: map[string]struct{}{
+			models.TenantActivityStatusFROZEN: struct{}{},
+			models.TenantActivityStatusHOT:    struct{}{},
+		},
+	}
+	for _, tenant := range tenants {
+		existingTenant, ok := existingByName[tenant.Name]
+		if !ok {
+			return fmt.Errorf("tenant %q does not exist", tenant.Name)
+		}
+
+		if _, ok := allowedTransitions[tenant.ActivityStatus]; ok {
+			if _, ok := allowedTransitions[tenant.ActivityStatus][existingTenant.ActivityStatus]; ok {
+				continue
+			}
+		}
+		return fmt.Errorf("unsupported activity status change from %q to %q for tenant %q",
+			existingTenant.ActivityStatus, tenant.ActivityStatus, tenant.Name)
+	}
+
 	return nil
 }
 
@@ -159,14 +199,25 @@ func (h *Handler) UpdateTenants(ctx context.Context, principal *models.Principal
 	if err := h.Authorizer.Authorize(principal, "update", tenantsPath); err != nil {
 		return err
 	}
+
+	info, err := h.multiTenancy(class)
+	if err != nil {
+		return err
+	}
+
 	validated, err := validateTenants(tenants)
+	if err != nil {
+		return err
+	}
+
+	existingTenants, err := h.tenants(class, info)
 	if err != nil {
 		return err
 	}
 	if err := validateActivityStatuses(validated, false); err != nil {
 		return err
 	}
-	if _, err := h.multiTenancy(class); err != nil {
+	if err := validateActivityStatusTransitions(validated, existingTenants); err != nil {
 		return err
 	}
 
@@ -218,6 +269,10 @@ func (h *Handler) GetTenants(ctx context.Context, principal *models.Principal, c
 		return nil, err
 	}
 
+	return h.tenants(class, info)
+}
+
+func (h *Handler) tenants(class string, info store.ClassInfo) ([]*models.Tenant, error) {
 	ts := make([]*models.Tenant, info.Tenants)
 	f := func(_ *models.Class, ss *sharding.State) error {
 		if N := len(ss.Physical); N > len(ts) {
