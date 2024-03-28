@@ -32,7 +32,7 @@ import (
 type Tenant struct {
 
 	// activity status of the tenant's shard. Optional for creating tenant (implicit `HOT`) and required for updating tenant. Allowed values are `HOT` - tenant is fully active, `WARM` - tenant is active, some restrictions are imposed (TBD; not supported yet), `COLD` - tenant is inactive; no actions can be performed on tenant, tenant's files are stored locally, `FROZEN` - as COLD, but files are stored on cloud storage (not supported yet)
-	// Enum: [HOT WARM COLD FROZEN]
+	// Enum: [HOT WARM COLD FROZEN FROZEN_LOAD FROZEN_OFFLOAD]
 	ActivityStatus string `json:"activityStatus,omitempty"`
 
 	// name of the tenant
@@ -57,7 +57,7 @@ var tenantTypeActivityStatusPropEnum []interface{}
 
 func init() {
 	var res []string
-	if err := json.Unmarshal([]byte(`["HOT","WARM","COLD","FROZEN"]`), &res); err != nil {
+	if err := json.Unmarshal([]byte(`["HOT","WARM","COLD","FROZEN","FROZEN_LOAD","FROZEN_OFFLOAD"]`), &res); err != nil {
 		panic(err)
 	}
 	for _, v := range res {
@@ -78,6 +78,12 @@ const (
 
 	// TenantActivityStatusFROZEN captures enum value "FROZEN"
 	TenantActivityStatusFROZEN string = "FROZEN"
+
+	// TenantActivityStatusFROZENLOAD captures enum value "FROZEN_LOAD"
+	TenantActivityStatusFROZENLOAD string = "FROZEN_LOAD"
+
+	// TenantActivityStatusFROZENOFFLOAD captures enum value "FROZEN_OFFLOAD"
+	TenantActivityStatusFROZENOFFLOAD string = "FROZEN_OFFLOAD"
 )
 
 // prop value enum

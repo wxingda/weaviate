@@ -2251,7 +2251,9 @@
             "HOT",
             "WARM",
             "COLD",
-            "FROZEN"
+            "FROZEN",
+            "FROZEN_LOAD",
+            "FROZEN_OFFLOAD"
           ]
         }
       }

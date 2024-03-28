@@ -254,8 +254,28 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 		}
 	}
 
+	// further processing needed to offload/load tenant (async)
+	offloads := map[string]*schemaUC.TenantStatusTransition{}
+	loads := map[string]*schemaUC.TenantStatusTransition{}
+	for name, transition := range transitions {
+		if transition.To == models.TenantActivityStatusFROZEN &&
+			transition.From == models.TenantActivityStatusHOT {
+			offloads[name] = transition
+		}
+		if transition.To == models.TenantActivityStatusHOT &&
+			transition.From == models.TenantActivityStatusFROZEN {
+			loads[name] = transition
+		}
+	}
+
 	for name, transition := range transitions {
 		fmt.Printf("transition %q %v\n\n", name, transition)
+	}
+	for name, transition := range offloads {
+		fmt.Printf("offloads %q %v\n\n", name, transition)
+	}
+	for name, transition := range loads {
+		fmt.Printf("loads %q %v\n\n", name, transition)
 	}
 
 	payload := params.Body

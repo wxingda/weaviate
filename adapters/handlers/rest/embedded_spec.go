@@ -5225,7 +5225,9 @@ func init() {
             "HOT",
             "WARM",
             "COLD",
-            "FROZEN"
+            "FROZEN",
+            "FROZEN_LOAD",
+            "FROZEN_OFFLOAD"
           ]
         },
         "name": {
@@ -11062,7 +11064,9 @@ func init() {
             "HOT",
             "WARM",
             "COLD",
-            "FROZEN"
+            "FROZEN",
+            "FROZEN_LOAD",
+            "FROZEN_OFFLOAD"
           ]
         },
         "name": {
