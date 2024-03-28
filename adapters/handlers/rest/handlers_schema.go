@@ -12,6 +12,8 @@
 package rest
 
 import (
+	"fmt"
+
 	"github.com/go-openapi/runtime/middleware"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations"
@@ -20,11 +22,13 @@ import (
 	"github.com/weaviate/weaviate/usecases/auth/authorization/errors"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 	uco "github.com/weaviate/weaviate/usecases/objects"
+	"github.com/weaviate/weaviate/usecases/offload"
 	schemaUC "github.com/weaviate/weaviate/usecases/schema"
 )
 
 type schemaHandlers struct {
 	manager             *schemaUC.Manager
+	offloadScheduler    *offload.Scheduler
 	metricRequestsTotal restApiRequestsTotal
 }
 
@@ -234,7 +238,9 @@ func (s *schemaHandlers) createTenants(params schema.TenantsCreateParams,
 func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 	principal *models.Principal,
 ) middleware.Responder {
-	err := s.manager.UpdateTenants(
+	// TODO AL improve error handling (each tenant handler separately?)
+	// currently it is unknown what is going on with remaining tentants if single one fails
+	transitions, err := s.manager.UpdateTenants(
 		params.HTTPRequest.Context(), principal, params.ClassName, params.Body)
 	if err != nil {
 		s.metricRequestsTotal.logError(params.ClassName, err)
@@ -246,6 +252,10 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 			return schema.NewTenantsUpdateUnprocessableEntity().
 				WithPayload(errPayloadFromSingleErr(err))
 		}
+	}
+
+	for name, transition := range transitions {
+		fmt.Printf("transition %q %v\n\n", name, transition)
 	}
 
 	payload := params.Body
@@ -314,8 +324,14 @@ func (s *schemaHandlers) tenantExists(params schema.TenantExistsParams, principa
 	return schema.NewTenantExistsOK()
 }
 
-func setupSchemaHandlers(api *operations.WeaviateAPI, manager *schemaUC.Manager, metrics *monitoring.PrometheusMetrics, logger logrus.FieldLogger) {
-	h := &schemaHandlers{manager, newSchemaRequestsTotal(metrics, logger)}
+func setupSchemaHandlers(api *operations.WeaviateAPI, manager *schemaUC.Manager, offloadScheduler *offload.Scheduler,
+	metrics *monitoring.PrometheusMetrics, logger logrus.FieldLogger,
+) {
+	h := &schemaHandlers{
+		manager:             manager,
+		offloadScheduler:    offloadScheduler,
+		metricRequestsTotal: newSchemaRequestsTotal(metrics, logger),
+	}
 
 	api.SchemaSchemaObjectsCreateHandler = schema.
 		SchemaObjectsCreateHandlerFunc(h.addClass)

@@ -31,6 +31,12 @@ var regexTenantName = regexp.MustCompile(`^` + schema.ShardNameRegexCore + `$`)
 // tenantsPath is the main path used for authorization
 const tenantsPath = "schema/tenants"
 
+type TenantStatusTransition struct {
+	Name string
+	From string
+	To   string
+}
+
 // AddTenants is used to add new tenants to a class
 // Class must exist and has partitioning enabled
 func (m *Handler) AddTenants(ctx context.Context,
@@ -156,32 +162,27 @@ func validateActivityStatuses(tenants []*models.Tenant, allowEmpty bool) error {
 	return nil
 }
 
-func validateActivityStatusTransitions(tenants, existingTenants []*models.Tenant) error {
-	existingByName := make(map[string]*models.Tenant, len(existingTenants))
-	for _, existingTenant := range existingTenants {
-		existingByName[existingTenant.Name] = existingTenant
-	}
-
+func validateActivityStatusTransitions(tenants []*models.Tenant, existingTenantsByBame map[string]*models.Tenant) error {
 	// key = to, value = from
 	allowedTransitions := map[string]map[string]struct{}{
-		models.TenantActivityStatusHOT: map[string]struct{}{
+		models.TenantActivityStatusHOT: {
 			models.TenantActivityStatusFROZEN: struct{}{},
 			models.TenantActivityStatusCOLD:   struct{}{},
 			models.TenantActivityStatusHOT:    struct{}{},
 		},
-		models.TenantActivityStatusCOLD: map[string]struct{}{
+		models.TenantActivityStatusCOLD: {
 			models.TenantActivityStatusCOLD: struct{}{},
 			models.TenantActivityStatusHOT:  struct{}{},
 		},
-		models.TenantActivityStatusFROZEN: map[string]struct{}{
+		models.TenantActivityStatusFROZEN: {
 			models.TenantActivityStatusFROZEN: struct{}{},
 			models.TenantActivityStatusHOT:    struct{}{},
 		},
 	}
 	for _, tenant := range tenants {
-		existingTenant, ok := existingByName[tenant.Name]
+		existingTenant, ok := existingTenantsByBame[tenant.Name]
 		if !ok {
-			return fmt.Errorf("tenant %q does not exist", tenant.Name)
+			return uco.NewErrInvalidUserInput("tenant %q does not exist", tenant.Name)
 		}
 
 		if _, ok := allowedTransitions[tenant.ActivityStatus]; ok {
@@ -189,7 +190,7 @@ func validateActivityStatusTransitions(tenants, existingTenants []*models.Tenant
 				continue
 			}
 		}
-		return fmt.Errorf("unsupported activity status change from %q to %q for tenant %q",
+		return uco.NewErrInvalidUserInput("unsupported activity status change from %q to %q for tenant %q",
 			existingTenant.ActivityStatus, tenant.ActivityStatus, tenant.Name)
 	}
 
@@ -201,39 +202,54 @@ func validateActivityStatusTransitions(tenants, existingTenants []*models.Tenant
 // Class must exist and has partitioning enabled
 func (m *Handler) UpdateTenants(ctx context.Context, principal *models.Principal,
 	class string, tenants []*models.Tenant,
-) error {
+) (map[string]*TenantStatusTransition, error) {
 	if err := h.Authorizer.Authorize(principal, "update", tenantsPath); err != nil {
-		return err
+		return nil, err
 	}
 
 	info, err := h.multiTenancy(class)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	validated, err := validateTenants(tenants)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	existingTenants, err := h.tenants(class, info)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := validateActivityStatuses(validated, false); err != nil {
-		return err
-	}
-	if err := validateActivityStatusTransitions(validated, existingTenants); err != nil {
-		return err
+	existingTenantsByName := make(map[string]*models.Tenant, len(existingTenants))
+	for _, t := range existingTenants {
+		existingTenantsByName[t.Name] = t
 	}
 
+	if err := validateActivityStatuses(validated, false); err != nil {
+		return nil, err
+	}
+	if err := validateActivityStatusTransitions(validated, existingTenantsByName); err != nil {
+		return nil, err
+	}
+
+	transitions := make(map[string]*TenantStatusTransition, len(validated))
 	req := cluster.UpdateTenantsRequest{
-		Tenants: make([]*cluster.Tenant, len(tenants)),
+		Tenants: make([]*cluster.Tenant, len(validated)),
 	}
-	for i, tenant := range tenants {
-		req.Tenants[i] = &cluster.Tenant{Name: tenant.Name, Status: tenant.ActivityStatus}
+	for i, tenant := range validated {
+		transitions[tenant.Name] = &TenantStatusTransition{
+			Name: tenant.Name,
+			From: existingTenantsByName[tenant.Name].ActivityStatus,
+			To:   tenant.ActivityStatus,
+		}
+		req.Tenants[i] = &cluster.Tenant{
+			Name:       tenant.Name,
+			Status:     tenant.ActivityStatus,
+			PrevStatus: existingTenantsByName[tenant.Name].ActivityStatus,
+		}
 	}
-	return m.metaWriter.UpdateTenants(class, &req)
+	return transitions, h.metaWriter.UpdateTenants(class, &req)
 }
 
 // DeleteTenants is used to delete tenants of a class.

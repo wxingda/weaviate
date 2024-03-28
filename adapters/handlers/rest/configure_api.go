@@ -528,7 +528,14 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		appState.Authorizer,
 		appState.Logger, appState.Modules)
 
-	setupSchemaHandlers(api, appState.SchemaManager, appState.Metrics, appState.Logger)
+	offloadScheduler := offload.NewScheduler(
+		appState.Authorizer,
+		clients.NewClusterOffloads(appState.ClusterHttpClient),
+		appState.DB, appState.Modules,
+		appState.Cluster,
+		appState.Logger)
+
+	setupSchemaHandlers(api, appState.SchemaManager, offloadScheduler, appState.Metrics, appState.Logger)
 	objectsManager := objects.NewManager(appState.Locks,
 		appState.SchemaManager, appState.ServerConfig, appState.Logger,
 		appState.Authorizer, appState.DB, appState.Modules,
@@ -549,12 +556,7 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		appState.SchemaManager,
 		appState.Logger)
 	setupBackupHandlers(api, backupScheduler, appState.Metrics, appState.Logger)
-	offloadScheduler := offload.NewScheduler(
-		appState.Authorizer,
-		clients.NewClusterOffloads(appState.ClusterHttpClient),
-		appState.DB, appState.Modules,
-		appState.Cluster,
-		appState.Logger)
+	// TODO AL temporary, to be removed
 	setupOffloadHandlers(api, offloadScheduler, appState.Metrics, appState.Logger)
 	setupNodesHandlers(api, appState.SchemaManager, appState.DB, appState)
 

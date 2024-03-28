@@ -73,4 +73,5 @@ message Tenant {
   string name = 1;
   string status = 2;
   repeated string nodes = 3;
+  string prev_status = 4;
 }
