@@ -36,6 +36,16 @@ type TenantStatusTransition struct {
 	To   string
 }
 
+func (t *TenantStatusTransition) IsOffload() bool {
+	return t.From == models.TenantActivityStatusHOT &&
+		t.To == models.TenantActivityStatusFROZEN
+}
+
+func (t *TenantStatusTransition) IsLoad() bool {
+	return t.From == models.TenantActivityStatusFROZEN &&
+		t.To == models.TenantActivityStatusHOT
+}
+
 // AddTenants is used to add new tenants to a class
 // Class must exist and has partitioning enabled
 func (h *Handler) AddTenants(ctx context.Context,
@@ -232,17 +242,29 @@ func (h *Handler) UpdateTenants(ctx context.Context, principal *models.Principal
 		Tenants: make([]*cluster.Tenant, len(validated)),
 	}
 	for i, tenant := range validated {
-		transitions[tenant.Name] = &TenantStatusTransition{
+		transition := &TenantStatusTransition{
 			Name: tenant.Name,
 			From: existingTenantsByName[tenant.Name].ActivityStatus,
 			To:   tenant.ActivityStatus,
 		}
+		transitions[tenant.Name] = transition
+
+		// overwrite target status for offload/load to intermediate one
+		// final one will be set async when operation is finished
+		status := tenant.ActivityStatus
+		if transition.IsOffload() {
+			status = models.TenantActivityStatusFROZENOFFLOAD
+		}
+		if transition.IsLoad() {
+			status = models.TenantActivityStatusFROZENLOAD
+		}
 		req.Tenants[i] = &cluster.Tenant{
 			Name:       tenant.Name,
-			Status:     tenant.ActivityStatus,
+			Status:     status,
 			PrevStatus: existingTenantsByName[tenant.Name].ActivityStatus,
 		}
 	}
+
 	return transitions, h.metaWriter.UpdateTenants(class, &req)
 }
 
