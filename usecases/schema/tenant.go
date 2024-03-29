@@ -274,6 +274,22 @@ func (m *Handler) UpdateTenants(ctx context.Context, principal *models.Principal
 	return transitions, h.metaWriter.UpdateTenants(class, &req)
 }
 
+func (h *Handler) UpdateTenantsValidated(ctx context.Context,
+	class string, transitions []*TenantStatusTransition,
+) error {
+	req := &cluster.UpdateTenantsRequest{
+		Tenants: make([]*cluster.Tenant, len(transitions)),
+	}
+	for i, transition := range transitions {
+		req.Tenants[i] = &cluster.Tenant{
+			Name:       transition.Name,
+			Status:     transition.To,
+			PrevStatus: transition.From,
+		}
+	}
+	return h.metaWriter.UpdateTenants(class, req)
+}
+
 // DeleteTenants is used to delete tenants of a class.
 //
 // Class must exist and has partitioning enabled

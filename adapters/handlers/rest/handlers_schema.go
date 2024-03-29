@@ -12,6 +12,7 @@
 package rest
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/go-openapi/runtime/middleware"
@@ -19,6 +20,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/schema"
 	"github.com/weaviate/weaviate/entities/models"
+	eoff "github.com/weaviate/weaviate/entities/offload"
 	"github.com/weaviate/weaviate/usecases/auth/authorization/errors"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 	uco "github.com/weaviate/weaviate/usecases/objects"
@@ -238,10 +240,11 @@ func (s *schemaHandlers) createTenants(params schema.TenantsCreateParams,
 func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 	principal *models.Principal,
 ) middleware.Responder {
+	ctx := params.HTTPRequest.Context()
 	// TODO AL improve error handling (each tenant handler separately?)
 	// currently it is unknown what is going on with remaining tentants if single one fails
 	transitions, err := s.manager.UpdateTenants(
-		params.HTTPRequest.Context(), principal, params.ClassName, params.Body)
+		ctx, principal, params.ClassName, params.Body)
 	if err != nil {
 		s.metricRequestsTotal.logError(params.ClassName, err)
 		switch err.(type) {
@@ -268,6 +271,56 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 		}
 	}
 
+	if len(offloads) > 0 {
+		compression := offload.Compression{
+			Level:         offload.DefaultCompression,
+			CPUPercentage: offload.DefaultCPUPercentage,
+			ChunkSize:     offload.DefaultChunkSize,
+		}
+
+		for _, o := range offloads {
+			req := &offload.OffloadRequest{
+				Class:       params.ClassName,
+				Tenant:      o.Name,
+				Backend:     "filesystem", // TODO AL make configurable, move to offloader?
+				Compression: compression,  // TODO AL remove? move to offloader?
+			}
+
+			// TODO AL change callback to run in worker?
+			err := s.offloadScheduler.OffloadSimple(ctx, req,
+				func(desc *eoff.OffloadDistributedDescriptor) {
+					fmt.Printf("  ==> offload status %q\n", desc.Status)
+					if desc.Status == eoff.Success {
+						if err := s.manager.UpdateTenantsValidated(context.Background(), params.ClassName,
+							[]*schemaUC.TenantStatusTransition{{
+								Name: o.Name,
+								From: models.TenantActivityStatusFROZENOFFLOAD,
+								To:   models.TenantActivityStatusFROZEN,
+							}}); err != nil {
+							// TODO AL log error
+							fmt.Printf("  ==> offload commit error %s\n", err)
+						}
+					} else {
+						// TODO AL log error/issue
+						if err := s.manager.UpdateTenantsValidated(context.Background(), params.ClassName,
+							[]*schemaUC.TenantStatusTransition{{
+								Name: o.Name,
+								From: models.TenantActivityStatusFROZENOFFLOAD,
+								To:   models.TenantActivityStatusHOT,
+							}}); err != nil {
+							// TODO AL log error
+							fmt.Printf("  ==> offload revert error %s\n", err)
+						}
+					}
+				},
+			)
+			if err != nil {
+				return schema.NewTenantsUpdateUnprocessableEntity().
+					WithPayload(errPayloadFromSingleErr(err))
+			}
+		}
+	}
+
 	for name, transition := range transitions {
 		fmt.Printf("transition %q %v\n\n", name, transition)
 	}
@@ -278,6 +331,7 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 		fmt.Printf("loads %q %v\n\n", name, transition)
 	}
 
+	// TODO AL adjust payload to intermediate statuses when offload/load
 	payload := params.Body
 
 	s.metricRequestsTotal.logOk(params.ClassName)
