@@ -134,8 +134,9 @@ func (e *executor) UpdateTenants(class string, req *cluster.UpdateTenantsRequest
 	updates := make([]*UpdateTenantPayload, 0, len(req.Tenants))
 	for _, tu := range req.Tenants {
 		updates = append(updates, &UpdateTenantPayload{
-			Name:   tu.Name,
-			Status: tu.Status,
+			Name:       tu.Name,
+			Status:     tu.Status,
+			PrevStatus: tu.PrevStatus,
 		})
 	}
 

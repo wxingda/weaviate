@@ -99,7 +99,7 @@ func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *Offl
 		Compression: req.Compression,
 		ID:          req.ID(),
 	}
-	if err := s.offloader.Offload(ctx, store, &breq); err != nil {
+	if err := s.offloader.Offload(ctx, store, &breq, func(_ *offload.OffloadDistributedDescriptor) {}); err != nil {
 		return nil, offload.NewErrUnprocessable(err)
 	} else {
 		st := s.offloader.lastOp.get()
@@ -111,6 +111,58 @@ func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *Offl
 			Status:  &status,
 			Path:    st.Path,
 		}, nil
+	}
+}
+
+func (s *Scheduler) OffloadSimple(ctx context.Context, req *OffloadRequest,
+	callback func(desc *offload.OffloadDistributedDescriptor),
+) error {
+	// defer func(begin time.Time) {
+	// 	logOperation(s.logger, "try_backup", req.ID, req.Backend, begin, err)
+	// }(time.Now())
+
+	// // TODO authorize
+	// path := fmt.Sprintf("offloads/%s/%s", req.Backend, req.Class)
+	// if err := s.authorizer.Authorize(pr, "add", path); err != nil {
+	// 	return nil, err
+	// }
+	store, err := coordBackend(s.backends, req.Backend, req.ID())
+	if err != nil {
+		// err = fmt.Errorf("no offloads backend %q: %w, did you enable the right module?", req.Backend, err)
+		// return nil, offload.NewErrUnprocessable(err)
+		return fmt.Errorf("no offloads backend %q: %w, did you enable the right module?", req.Backend, err)
+	}
+
+	// classes, err := s.validateOffloadRequest(ctx, store, req)
+	// if err != nil {
+	// 	return nil, offload.NewErrUnprocessable(err)
+	// }
+
+	if err := store.Initialize(ctx); err != nil {
+		return fmt.Errorf("init backend: %w", err)
+		// return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
+	}
+	breq := Request{
+		Method:      OpCreate,
+		Backend:     req.Backend,
+		Class:       req.Class,
+		Tenant:      req.Tenant,
+		Compression: req.Compression,
+		ID:          req.ID(),
+	}
+	if err := s.offloader.Offload(ctx, store, &breq, callback); err != nil {
+		return offload.NewErrUnprocessable(err)
+	} else {
+		return nil
+		// st := s.offloader.lastOp.get()
+		// status := string(st.Status)
+		// return &models.OffloadResponse{
+		// 	Class:   req.Class,
+		// 	Tenant:  req.Tenant,
+		// 	Backend: req.Backend,
+		// 	Status:  &status,
+		// 	Path:    st.Path,
+		// }, nil
 	}
 }
 

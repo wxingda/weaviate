@@ -129,7 +129,9 @@ func newCoordinator(
 }
 
 // Backup coordinates a distributed backup among participants
-func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Request) error {
+func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Request,
+	finishedCallback func(desc *offload.OffloadDistributedDescriptor),
+) error {
 	req.Method = OpCreate
 	groups, err := c.groupByNode(ctx, req.Class, req.Tenant)
 	if err != nil {
@@ -183,6 +185,7 @@ func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Reques
 		} else {
 			c.log.WithFields(logFields).Errorf("coordinator: %s", c.descriptor.Error)
 		}
+		finishedCallback(c.descriptor)
 	}
 	enterrors.GoWrapper(f, c.log)
 

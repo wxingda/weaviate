@@ -28,8 +28,9 @@ type CreateTenantPayload struct {
 }
 
 type UpdateTenantPayload struct {
-	Name   string
-	Status string
+	Name       string
+	Status     string
+	PrevStatus string
 }
 
 // Migrator represents both the input and output interface of the Composer
