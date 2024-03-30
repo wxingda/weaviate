@@ -468,6 +468,12 @@ func (p *Provider) ValidateSearchParam(name string, value interface{}, className
 }
 
 func (p *Provider) validateSearchParam(name string, value interface{}, class *models.Class) error {
+	if len(p.GetAll()) == 0 {
+		return fmt.Errorf(
+			"can't search with %q because no vectorizer module is enabled. "+
+				"Use nearObject or nearVector instead", name)
+	}
+
 	for _, module := range p.GetAll() {
 		if p.shouldCrossClassIncludeClassArgument(class, module.Name(), module.Type()) {
 			if args, ok := module.(modulecapabilities.GraphQLArguments); ok {
