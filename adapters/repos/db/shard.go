@@ -163,8 +163,9 @@ type ShardLike interface {
 
 	Metrics() *Metrics
 
-	offloadDescriptor(ctx context.Context, id string, desc *offload.ShardDescriptor) error
-	releaseOffload(ctx context.Context, id, class, tenant string) error
+	offloadDescriptor(ctx context.Context, desc *offload.ShardDescriptor) error
+	releaseSuccessfulOffload(ctx context.Context) error
+	releaseFailedOffload(ctx context.Context) error
 }
 
 // Shard is the smallest completely-contained index unit. A shard manages

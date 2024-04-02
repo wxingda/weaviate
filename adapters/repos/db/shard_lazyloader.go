@@ -624,30 +624,23 @@ func (l *LazyLoadShard) isLoaded() bool {
 	return l.loaded
 }
 
-// func (l *LazyLoadShard) initOngoingOffload(id string) error {
-// 	if err := l.Load(context.Background()); err != nil {
-// 		return err
-// 	}
-// 	return l.shard.initOngoingOffload(id)
-// }
-
-// func (l *LazyLoadShard) resetOngoingOffload() {
-// 	l.mustLoad()
-// 	l.shard.resetOngoingOffload()
-// }
-
-func (l *LazyLoadShard) offloadDescriptor(ctx context.Context, offloadId string,
-	desc *offload.ShardDescriptor,
-) error {
+func (l *LazyLoadShard) offloadDescriptor(ctx context.Context, desc *offload.ShardDescriptor) error {
 	if err := l.Load(ctx); err != nil {
 		return err
 	}
-	return l.shard.offloadDescriptor(ctx, offloadId, desc)
+	return l.shard.offloadDescriptor(ctx, desc)
 }
 
-func (l *LazyLoadShard) releaseOffload(ctx context.Context, id, class, tenant string) error {
+func (l *LazyLoadShard) releaseSuccessfulOffload(ctx context.Context) error {
 	if err := l.Load(ctx); err != nil {
 		return err
 	}
-	return l.shard.releaseOffload(ctx, id, class, tenant)
+	return l.shard.releaseSuccessfulOffload(ctx)
+}
+
+func (l *LazyLoadShard) releaseFailedOffload(ctx context.Context) error {
+	if err := l.Load(ctx); err != nil {
+		return err
+	}
+	return l.shard.releaseFailedOffload(ctx)
 }
