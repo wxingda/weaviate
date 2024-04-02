@@ -196,7 +196,7 @@ func (u *uploader) withCompression(cfg zipConfig) *uploader {
 func (u *uploader) all(ctx context.Context, class string, tenant string, desc *offload.OffloadNodeDescriptor) (err error) {
 	u.setStatus(offload.Transferring)
 	desc.Status = string(offload.Transferring)
-	shardsCh := u.sourcer.OffloadDescriptors(ctx, desc.ID, class, tenant)
+	shardsCh := u.sourcer.OffloadDescriptors(ctx, class, []string{tenant})
 
 	defer func() {
 		//  make sure context is not cancelled when uploading metadata
@@ -263,7 +263,7 @@ func (u *uploader) class(ctx context.Context, desc *offload.OffloadNodeDescripto
 	// }
 	defer func() {
 		// backups need to be released anyway
-		go u.sourcer.ReleaseOffload(context.Background(), desc.ID, desc.Class, desc.Tenant)
+		go u.sourcer.ReleaseOffload(context.Background(), desc.Class, desc.Tenant, true)
 	}()
 
 	ctx, cancel := context.WithTimeout(ctx, storeTimeout)

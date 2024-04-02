@@ -224,11 +224,11 @@ func (d *OffloadDistributedDescriptor) ResetStatus() *OffloadDistributedDescript
 }
 
 type ShardDescriptor struct {
-	// Tenant string   `json:"tenant"`
-	// Class  string   `json:"class"`
-	Node  string   `json:"node"`
-	Files []string `json:"files,omitempty"`
-	Error error    `json:"-"`
+	Tenant string   `json:"tenant"`
+	Class  string   `json:"class"`
+	Node   string   `json:"node"`
+	Files  []string `json:"files,omitempty"`
+	Error  error    `json:"-"`
 
 	// DocIDCounterPath      string `json:"docIdCounterPath,omitempty"`
 	// DocIDCounter          []byte `json:"docIdCounter,omitempty"`

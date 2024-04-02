@@ -20,7 +20,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
-	"github.com/weaviate/weaviate/entities/offload"
 	"github.com/weaviate/weaviate/entities/schema"
 )
 
@@ -79,67 +78,6 @@ func (db *DB) BackupDescriptors(ctx context.Context, bakid string, classes []str
 		close(ds)
 	}()
 	return ds
-}
-
-// BackupDescriptors returns a channel of class descriptors.
-// Class descriptor records everything needed to restore a class
-// If an error happens a descriptor with an error will be written to the channel just before closing it.
-func (db *DB) OffloadDescriptors(ctx context.Context, id string, class string, tenant string,
-) <-chan offload.ShardDescriptor {
-	// TODO AL number of tenants?
-	ds := make(chan offload.ShardDescriptor, 1)
-	go func() {
-		desc := offload.ShardDescriptor{}
-		desc.Error = func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			idx := db.GetIndex(schema.ClassName(class))
-			if idx == nil {
-				return fmt.Errorf("class %v doesn't exist any more", class)
-			}
-			shard := idx.shards.Load(tenant)
-			if shard == nil {
-				return fmt.Errorf("tenant %v doesn't exist any more", tenant)
-			}
-			return shard.offloadDescriptor(ctx, id, &desc)
-		}()
-		ds <- desc
-		close(ds)
-	}()
-	return ds
-}
-
-func (db *DB) ReleaseOffload(ctx context.Context, id, class, tenant string) (err error) {
-	fields := logrus.Fields{
-		"op":     "release_offload",
-		"class":  class,
-		"tenant": tenant,
-		"id":     id,
-	}
-	db.logger.WithFields(fields).Debug("starting")
-	begin := time.Now()
-	defer func() {
-		l := db.logger.WithFields(fields).WithField("took", time.Since(begin))
-		if err != nil {
-			l.Error(err)
-			return
-		}
-		l.Debug("finish")
-	}()
-
-	idx := db.GetIndex(schema.ClassName(class))
-	if idx == nil {
-		err = fmt.Errorf("release offload: class %v doesn't exist any more", class)
-		return
-	}
-	shard := idx.shards.Load(tenant)
-	if shard == nil {
-		err = fmt.Errorf("release offload: tenant %v doesn't exist any more", tenant)
-		return
-	}
-	err = shard.releaseOffload(ctx, id, class, tenant)
-	return
 }
 
 func (db *DB) ShardsBackup(
