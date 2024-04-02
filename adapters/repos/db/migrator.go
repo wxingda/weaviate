@@ -494,6 +494,12 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 		func() (commitFn, error) {
 			return m.updateTenantsFrozenOffloadToFrozen(ctx, idx, shardsFrozenOffloadToFrozen)
 		},
+
+		func() (commitFn, error) { return m.updateTenantsFrozenToFrozenLoad(ctx, idx, shardsFrozenToFrozenLoad) },
+		func() (commitFn, error) { return m.updateTenantsFrozenLoadToFrozen(ctx, idx, shardsFrozenLoadToFrozen) },
+		func() (commitFn, error) {
+			return m.updateTenantsFrozenLoadToHot(ctx, idx, shardsFrozenLoadToHot, class)
+		},
 	} {
 		c, err = update()
 		if err != nil {
@@ -719,25 +725,79 @@ func (m *Migrator) updateTenantsFrozenOffloadToFrozen(ctx context.Context, idx *
 
 // revert hot -> frozen (to initial status)
 func (m *Migrator) updateTenantsFrozenOffloadToHot(ctx context.Context, idx *Index, shards []string,
-) (commit func(success bool), err error) {
+) (commit commitFn, err error) {
 	// do nothing
 	return commitNoop, nil
 }
 
-// // init frozen -> hot (1st step, to intermediate status)
-// func (m *Migrator) updateTenantsFrozenToFrozenLoad() (commit func(success bool), err error) {
+// init frozen -> hot (1st step, to intermediate status)
+func (m *Migrator) updateTenantsFrozenToFrozenLoad(ctx context.Context, idx *Index, shards []string,
+) (commit commitFn, err error) {
+	// do nothing
+	return commitNoop, nil
+}
 
-// }
+// commit frozen -> hot (2nd step, to final status)
+func (m *Migrator) updateTenantsFrozenLoadToHot(ctx context.Context, idx *Index, shards []string, class *models.Class,
+) (commit commitFn, err error) {
+	shardsAffected := make(map[string]ShardLike, len(shards))
+	apply := func() {
+		for name, shard := range shardsAffected {
+			idx.shards.Store(name, shard)
+		}
+	}
+	rollback := func() {
+		eg := enterrors.NewErrorGroupWrapper(m.logger)
+		eg.SetLimit(2 * _NUMCPU)
+		for name, shard := range shardsAffected {
+			name, shard := name, shard
+			eg.Go(func() error {
+				if err := shard.drop(); err != nil {
+					idx.logger.WithField("action", "rollback_drop_shard").
+						WithField("shard", shard.ID()).
+						Errorf("cannot drop self activated shard %q: %s", name, err)
+				}
+				return nil
+			}, name, shard)
+		}
+		eg.Wait()
+	}
 
-// // commit frozen -> hot (2nd step, to final status)
-// func (m *Migrator) updateTenantsFrozenLoadToHot() (commit func(success bool), err error) {
+	defer func() {
+		if err != nil {
+			rollback()
+		}
+	}()
 
-// }
+	var shard ShardLike
+	for _, name := range shards {
+		// shard already hot
+		if shard = idx.shards.Load(name); shard != nil {
+			continue
+		}
 
-// // revert frozen -> hot (to initial status)
-// func (m *Migrator) updateTenantsFrozenLoadToFrozen() (commit func(success bool), err error) {
+		shard, err = idx.initShard(ctx, name, class, m.db.promMetrics)
+		if err != nil {
+			return
+		}
+		shardsAffected[name] = shard
+	}
 
-// }
+	return func(success bool) {
+		if success {
+			apply()
+		} else {
+			rollback()
+		}
+	}, nil
+}
+
+// revert frozen -> hot (to initial status)
+func (m *Migrator) updateTenantsFrozenLoadToFrozen(ctx context.Context, idx *Index, shards []string,
+) (commit commitFn, err error) {
+	// do nothing
+	return commitNoop, nil
+}
 
 // DeleteTenants deletes tenants and returns a commit func
 // that can be used to either commit or rollback deletion

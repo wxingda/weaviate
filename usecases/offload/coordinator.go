@@ -198,8 +198,9 @@ func (c *coordinator) Onload(
 	store coordStore,
 	req *Request,
 	desc *offload.OffloadDistributedDescriptor,
+	finishedCallback func(status offload.Status),
 ) error {
-	req.Method = OpRestore
+	// req.Method = OpRestore
 	// make sure there is no active backup
 	if prevID := c.lastOp.renew(desc.ID, store.HomeDir()); prevID != "" {
 		return fmt.Errorf("restoration %s already in progress", prevID)
@@ -238,6 +239,7 @@ func (c *coordinator) Onload(
 		} else {
 			c.log.WithFields(logFields).Errorf("coordinator: %v", c.descriptor.Error)
 		}
+		finishedCallback(c.descriptor.Status)
 	}
 	enterrors.GoWrapper(g, c.log)
 

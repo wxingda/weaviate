@@ -48,7 +48,7 @@ func (s *offloadStat) get() reqStat {
 func (s *offloadStat) renew(id string, path string) string {
 	s.Lock()
 	defer s.Unlock()
-	if !s.reqStat.Starttime.IsZero() {
+	if s.reqStat.ID != "" {
 		return s.reqStat.ID
 	}
 	s.reqStat.ID = id

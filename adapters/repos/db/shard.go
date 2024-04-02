@@ -699,6 +699,11 @@ func (s *Shard) drop() (err error) {
 		return errors.Wrapf(err, "remove property specific indices at %s", s.path())
 	}
 
+	err = os.RemoveAll(s.path())
+	if err != nil {
+		return errors.Wrapf(err, "remove shard dir at %s", s.path())
+	}
+
 	s.metrics.baseMetrics.FinishUnloadingShard(s.index.Config.ClassName.String())
 
 	return nil

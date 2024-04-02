@@ -321,6 +321,55 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 		}
 	}
 
+	if len(loads) > 0 {
+		compression := offload.Compression{
+			Level:         offload.DefaultCompression,
+			CPUPercentage: offload.DefaultCPUPercentage,
+			ChunkSize:     offload.DefaultChunkSize,
+		}
+		for _, l := range loads {
+			req := &offload.OffloadRequest{
+				Class:       params.ClassName,
+				Tenant:      l.Name,
+				Backend:     "filesystem", // TODO AL make configurable, move to offloader?
+				Compression: compression,  // TODO AL remove? move to offloader?
+			}
+
+			// TODO AL change callback to run in worker?
+			err := s.offloadScheduler.OnloadSimple(ctx, req,
+				func(status eoff.Status) {
+					fmt.Printf("  ==> load status %q\n", status)
+					if status == eoff.Success {
+						if err := s.manager.UpdateTenantsValidated(context.Background(), params.ClassName,
+							[]*schemaUC.TenantStatusTransition{{
+								Name: l.Name,
+								From: models.TenantActivityStatusFROZENLOAD,
+								To:   models.TenantActivityStatusHOT,
+							}}); err != nil {
+							// TODO AL log error
+							fmt.Printf("  ==> load commit error %s\n", err)
+						}
+					} else {
+						// TODO AL log error/issue
+						if err := s.manager.UpdateTenantsValidated(context.Background(), params.ClassName,
+							[]*schemaUC.TenantStatusTransition{{
+								Name: l.Name,
+								From: models.TenantActivityStatusFROZENLOAD,
+								To:   models.TenantActivityStatusFROZEN,
+							}}); err != nil {
+							// TODO AL log error
+							fmt.Printf("  ==> load revert error %s\n", err)
+						}
+					}
+				},
+			)
+			if err != nil {
+				return schema.NewTenantsUpdateUnprocessableEntity().
+					WithPayload(errPayloadFromSingleErr(err))
+			}
+		}
+	}
+
 	for name, transition := range transitions {
 		fmt.Printf("transition %q %v\n\n", name, transition)
 	}
