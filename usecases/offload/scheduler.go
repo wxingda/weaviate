@@ -206,7 +206,7 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 		Class:       req.Class,
 		Tenant:      req.Tenant,
 	}
-	err = s.onloader.Onload(ctx, store, &rReq, meta)
+	err = s.onloader.Onload(ctx, store, &rReq, meta, func(status offload.Status) {})
 	if err != nil {
 		status = string(offload.Failed)
 		data.Error = err.Error()
@@ -215,6 +215,57 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 
 	data.Status = &status
 	return data, nil
+}
+
+func (s *Scheduler) OnloadSimple(ctx context.Context, req *OffloadRequest,
+	callback func(status offload.Status),
+) error {
+	// defer func(begin time.Time) {
+	// 	logOperation(s.logger, "try_restore", req.ID, req.Backend, begin, err)
+	// }(time.Now())
+
+	// // TODO authorize
+	// path := fmt.Sprintf("offloads/%s/%s/onload", req.Backend, req.Class)
+	// if err := s.authorizer.Authorize(pr, "restore", path); err != nil {
+	// 	return nil, err
+	// }
+	store, err := coordBackend(s.backends, req.Backend, req.ID())
+	if err != nil {
+		err = fmt.Errorf("no backup backend %q: %w, did you enable the right module?", req.Backend, err)
+		return offload.NewErrUnprocessable(err)
+	}
+	meta, err := s.validateRestoreRequest(ctx, store, req)
+	if err != nil {
+		if errors.Is(err, errMetaNotFound) {
+			return offload.NewErrNotFound(err)
+		}
+		return offload.NewErrUnprocessable(err)
+	}
+	// status := string(offload.Started)
+	// data := &models.OnloadResponse{
+	// 	Backend: req.Backend,
+	// 	Path:    store.HomeDir(),
+	// 	Class:   req.Class,
+	// 	Tenant:  req.Tenant,
+	// }
+
+	rReq := Request{
+		Method:      OpRestore,
+		ID:          req.ID(),
+		Backend:     req.Backend,
+		Compression: req.Compression,
+		Class:       req.Class,
+		Tenant:      req.Tenant,
+	}
+	err = s.onloader.Onload(ctx, store, &rReq, meta, callback)
+	if err != nil {
+		// status = string(offload.Failed)
+		// data.Error = err.Error()
+		return offload.NewErrUnprocessable(err)
+	}
+
+	// data.Status = &status
+	return nil
 }
 
 // func (s *Scheduler) BackupStatus(ctx context.Context, principal *models.Principal,
