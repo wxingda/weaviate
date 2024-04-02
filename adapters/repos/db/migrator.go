@@ -321,65 +321,423 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 		return fmt.Errorf("cannot find index for %q", class.Class)
 	}
 
-	updatesHot := make([]string, 0, len(updates))
-	updatesCold := make([]string, 0, len(updates))
+	l := len(updates)
+
+	shardsColdToHot := make([]string, 0, l)
+	shardsHotToCold := make([]string, 0, l)
+
+	shardsHotToFrozenOffload := make([]string, 0, l)
+	shardsFrozenOffloadToFrozen := make([]string, 0, l)
+	shardsFrozenOffloadToHot := make([]string, 0, l)
+
+	shardsFrozenToFrozenLoad := make([]string, 0, l)
+	shardsFrozenLoadToHot := make([]string, 0, l)
+	shardsFrozenLoadToFrozen := make([]string, 0, l)
+
+	// shardsHotted := make(map[string]ShardLike)
+	// shardsColded := make(map[string]ShardLike)
+
+	// rollbackHotted := func() {
+	// 	eg := enterrors.NewErrorGroupWrapper(m.logger)
+	// 	eg.SetLimit(2 * _NUMCPU)
+	// 	for name, shard := range shardsHotted {
+	// 		name, shard := name, shard
+	// 		eg.Go(func() error {
+	// 			if err := shard.Shutdown(ctx); err != nil {
+	// 				idx.logger.WithField("action", "rollback_shutdown_shard").
+	// 					WithField("shard", shard.ID()).
+	// 					Errorf("cannot shutdown self activated shard %q: %s", name, err)
+	// 			}
+	// 			return nil
+	// 		}, name, shard)
+	// 	}
+	// 	eg.Wait()
+	// }
+	// rollbackColded := func() {
+	// 	for name, shard := range shardsColded {
+	// 		idx.shards.CompareAndSwap(name, nil, shard)
+	// 	}
+	// }
+	// rollback := func() {
+	// 	rollbackHotted()
+	// 	rollbackColded()
+	// }
+
+	// commitHotted := func() {
+	// 	for name, shard := range shardsHotted {
+	// 		idx.shards.Store(name, shard)
+	// 	}
+	// }
+	// commitColded := func() {
+	// 	for name := range shardsColded {
+	// 		idx.shards.LoadAndDelete(name)
+	// 	}
+
+	// 	eg := enterrors.NewErrorGroupWrapper(m.logger)
+	// 	eg.SetLimit(_NUMCPU * 2)
+	// 	for name, shard := range shardsColded {
+	// 		name, shard := name, shard
+	// 		eg.Go(func() error {
+	// 			if err := shard.Shutdown(ctx); err != nil {
+	// 				idx.logger.WithField("action", "shutdown_shard").
+	// 					WithField("shard", shard.ID()).
+	// 					Errorf("cannot shutdown shard %q: %s", name, err)
+	// 			}
+	// 			return nil
+	// 		}, name, shard)
+	// 	}
+	// 	eg.Wait()
+	// }
+	// commit = func(success bool) {
+	// 	if !success {
+	// 		rollback()
+	// 		return
+	// 	}
+	// 	commitHotted()
+	// 	commitColded()
+	// }
+
+	// applyHot := func() error {
+	// 	for _, name := range shardsColdToHot {
+	// 		// shard already hot
+	// 		if shard := idx.shards.Load(name); shard != nil {
+	// 			continue
+	// 		}
+
+	// 		shard, err := idx.initShard(ctx, name, class, m.db.promMetrics)
+	// 		if err != nil {
+	// 			return fmt.Errorf("cannot activate shard '%s': %w", name, err)
+	// 		}
+	// 		shardsHotted[name] = shard
+	// 	}
+	// 	return nil
+	// }
+	// applyCold := func() error {
+	// 	idx.backupMutex.RLock()
+	// 	defer idx.backupMutex.RUnlock()
+
+	// 	for _, name := range shardsHotToCold {
+	// 		shard, ok := idx.shards.Swap(name, nil) // mark as deactivated
+	// 		if !ok {                                // shard doesn't exist (already cold)
+	// 			idx.shards.LoadAndDelete(name) // rollback nil value created by swap()
+	// 			continue
+	// 		}
+	// 		if shard != nil {
+	// 			shardsColded[name] = shard
+	// 		}
+	// 	}
+	// 	return nil
+	// }
+
 	for _, update := range updates {
-		switch update.Status {
+		switch update.PrevStatus {
 		case models.TenantActivityStatusHOT:
-			updatesHot = append(updatesHot, update.Name)
+			switch update.Status {
+			case models.TenantActivityStatusCOLD:
+				shardsHotToCold = append(shardsHotToCold, update.Name)
+			case models.TenantActivityStatusFROZENOFFLOAD:
+				shardsHotToFrozenOffload = append(shardsHotToFrozenOffload, update.Name)
+			}
+
 		case models.TenantActivityStatusCOLD:
-			updatesCold = append(updatesCold, update.Name)
+			switch update.Status {
+			case models.TenantActivityStatusHOT:
+				shardsColdToHot = append(shardsColdToHot, update.Name)
+			}
+
+		case models.TenantActivityStatusFROZEN:
+			switch update.Status {
+			case models.TenantActivityStatusFROZENLOAD:
+				shardsFrozenToFrozenLoad = append(shardsFrozenToFrozenLoad, update.Name)
+			}
+
+		case models.TenantActivityStatusFROZENLOAD:
+			switch update.Status {
+			case models.TenantActivityStatusFROZEN:
+				shardsFrozenLoadToFrozen = append(shardsFrozenLoadToFrozen, update.Name)
+			case models.TenantActivityStatusHOT:
+				shardsFrozenLoadToHot = append(shardsFrozenLoadToHot, update.Name)
+			}
+
+		case models.TenantActivityStatusFROZENOFFLOAD:
+			switch update.Status {
+			case models.TenantActivityStatusFROZEN:
+				shardsFrozenOffloadToFrozen = append(shardsFrozenOffloadToFrozen, update.Name)
+			case models.TenantActivityStatusHOT:
+				shardsFrozenOffloadToHot = append(shardsFrozenOffloadToHot, update.Name)
+			}
 		}
 	}
 
-	ec := &errorcompounder.ErrorCompounder{}
-
-	for _, name := range updatesHot {
-		_, err := idx.getOrInitLocalShard(ctx, name)
-		ec.Add(err)
+	commits := make([]commitFn, 0, l)
+	commit = func(success bool) {
+		for i := range commits {
+			commits[i](success)
+		}
 	}
 
-	if len(updatesCold) > 0 {
-		idx.backupMutex.RLock()
-		defer idx.backupMutex.RUnlock()
+	defer func() {
+		// rollback on error
+		if err != nil {
+			commit(false)
+			commit = nil
+		}
+	}()
+
+	var c commitFn
+	for _, update := range []func() (commitFn, error){
+		func() (commitFn, error) { return m.updateTenantsColdToHot(ctx, idx, shardsColdToHot, class) },
+		func() (commitFn, error) { return m.updateTenantsHotToCold(ctx, idx, shardsHotToCold) },
+
+		func() (commitFn, error) { return m.updateTenantsHotToFrozenOffload(ctx, idx, shardsHotToFrozenOffload) },
+		func() (commitFn, error) { return m.updateTenantsFrozenOffloadToHot(ctx, idx, shardsFrozenOffloadToHot) },
+		func() (commitFn, error) {
+			return m.updateTenantsFrozenOffloadToFrozen(ctx, idx, shardsFrozenOffloadToFrozen)
+		},
+	} {
+		c, err = update()
+		if err != nil {
+			return
+		}
+		commits = append(commits, c)
+	}
+	return
+
+	// c, err = m.updateTenantsHotToCold(ctx, idx, shardsHotToCold)
+	// if err != nil {
+	// 	return
+	// }
+	// commits = append(commits, c)
+	// c, err = m.updateTenantsColdToHot(ctx, idx, shardsColdToHot, class)
+	// if err != nil {
+	// 	return
+	// }
+	// commits = append(commits, c)
+
+	// defer func() {
+	// 	if err != nil {
+	// 		rollback()
+	// 	}
+	// }()
+
+	// if err := applyHot(); err != nil {
+	// 	return nil, err
+	// }
+	// if err := applyCold(); err != nil {
+	// 	return nil, err
+	// }
+
+	// return commit, nil
+}
+
+type commitFn func(success bool)
+
+var commitNoop commitFn = func(success bool) {}
+
+func (m *Migrator) updateTenantsHotToCold(ctx context.Context, idx *Index, shards []string,
+) (commit commitFn, err error) {
+	if len(shards) == 0 {
+		return commitNoop, nil
+	}
+
+	idx.backupMutex.RLock()
+	defer idx.backupMutex.RUnlock()
+
+	shardsAffected := make(map[string]ShardLike, len(shards))
+	apply := func() {
+		for name := range shardsAffected {
+			idx.shards.LoadAndDelete(name)
+		}
 
 		eg := enterrors.NewErrorGroupWrapper(m.logger)
 		eg.SetLimit(_NUMCPU * 2)
-
-		for _, name := range updatesCold {
-			name := name
+		for name, shard := range shardsAffected {
+			name, shard := name, shard
 			eg.Go(func() error {
-				shard := func() ShardLike {
-					idx.shardInUseLocks.Lock(name)
-					defer idx.shardInUseLocks.Unlock(name)
-
-					return idx.shards.Load(name)
-				}()
-
-				if shard == nil {
-					return nil // shard already does not exist or inactive
-				}
-
-				idx.shardCreateLocks.Lock(name)
-				defer idx.shardCreateLocks.Unlock(name)
-
-				idx.shards.LoadAndDelete(name)
-
 				if err := shard.Shutdown(ctx); err != nil {
-					if !errors.Is(err, errAlreadyShutdown) {
-						ec.Add(err)
-						idx.logger.WithField("action", "shutdown_shard").
-							WithField("shard", shard.ID()).Error(err)
-					}
-					m.logger.WithField("shard", shard.Name()).Debug("was already shut or dropped")
+					idx.logger.WithField("action", "shutdown_shard").
+						WithField("shard", shard.ID()).
+						Errorf("cannot shutdown shard %q: %s", name, err)
 				}
 				return nil
-			})
+			}, name, shard)
 		}
 		eg.Wait()
 	}
-	return ec.ToError()
+	rollback := func() {
+		for name, shard := range shardsAffected {
+			idx.shards.CompareAndSwap(name, nil, shard)
+		}
+	}
+
+	defer func() {
+		if err != nil {
+			rollback()
+		}
+	}()
+
+	for _, name := range shards {
+		shard, ok := idx.shards.Swap(name, nil) // mark as deactivated
+		if !ok {                                // shard doesn't exist (already cold)
+			idx.shards.LoadAndDelete(name) // rollback nil value created by swap()
+			continue
+		}
+		if shard != nil {
+			shardsAffected[name] = shard
+		}
+	}
+
+	return func(success bool) {
+		if success {
+			apply()
+		} else {
+			rollback()
+		}
+	}, nil
 }
+
+func (m *Migrator) updateTenantsColdToHot(ctx context.Context, idx *Index, shards []string, class *models.Class,
+) (commit commitFn, err error) {
+	shardsAffected := make(map[string]ShardLike, len(shards))
+	apply := func() {
+		for name, shard := range shardsAffected {
+			idx.shards.Store(name, shard)
+		}
+	}
+	rollback := func() {
+		eg := enterrors.NewErrorGroupWrapper(m.logger)
+		eg.SetLimit(2 * _NUMCPU)
+		for name, shard := range shardsAffected {
+			name, shard := name, shard
+			eg.Go(func() error {
+				if err := shard.Shutdown(ctx); err != nil {
+					idx.logger.WithField("action", "rollback_shutdown_shard").
+						WithField("shard", shard.ID()).
+						Errorf("cannot shutdown self activated shard %q: %s", name, err)
+				}
+				return nil
+			}, name, shard)
+		}
+		eg.Wait()
+	}
+
+	defer func() {
+		if err != nil {
+			rollback()
+		}
+	}()
+
+	var shard ShardLike
+	for _, name := range shards {
+		// shard already hot
+		if shard = idx.shards.Load(name); shard != nil {
+			continue
+		}
+
+		shard, err = idx.initShard(ctx, name, class, m.db.promMetrics)
+		if err != nil {
+			return
+		}
+		shardsAffected[name] = shard
+	}
+
+	return func(success bool) {
+		if success {
+			apply()
+		} else {
+			rollback()
+		}
+	}, nil
+}
+
+// init hot -> frozen (1st step, to intermediate status)
+func (m *Migrator) updateTenantsHotToFrozenOffload(ctx context.Context, idx *Index, shards []string,
+) (commit commitFn, err error) {
+	// do nothing
+	return commitNoop, nil
+}
+
+// commit hot -> frozen (2nd step, to final status)
+func (m *Migrator) updateTenantsFrozenOffloadToFrozen(ctx context.Context, idx *Index, shards []string,
+) (commit commitFn, err error) {
+	if len(shards) == 0 {
+		return commitNoop, nil
+	}
+
+	shardsAffected := make(map[string]ShardLike, len(shards))
+	apply := func() {
+		for name := range shardsAffected {
+			idx.shards.LoadAndDelete(name)
+		}
+
+		eg := enterrors.NewErrorGroupWrapper(m.logger)
+		eg.SetLimit(_NUMCPU * 2)
+		for name, shard := range shardsAffected {
+			name, shard := name, shard
+			eg.Go(func() error {
+				if err := shard.drop(); err != nil {
+					idx.logger.WithField("action", "drop_shard").
+						WithField("shard", shard.ID()).
+						Errorf("cannot drop shard %q: %s", name, err)
+				}
+				return nil
+			}, name, shard)
+		}
+		eg.Wait()
+	}
+	rollback := func() {
+		for name, shard := range shardsAffected {
+			idx.shards.CompareAndSwap(name, nil, shard)
+		}
+	}
+
+	defer func() {
+		if err != nil {
+			rollback()
+		}
+	}()
+
+	for _, name := range shards {
+		shard, ok := idx.shards.Swap(name, nil) // mark as deactivated
+		if !ok {                                // shard doesn't exist
+			idx.shards.LoadAndDelete(name) // rollback nil value created by swap()
+			continue
+		}
+		if shard != nil {
+			shardsAffected[name] = shard
+		}
+	}
+
+	return func(success bool) {
+		if success {
+			apply()
+		} else {
+			rollback()
+		}
+	}, nil
+}
+
+// revert hot -> frozen (to initial status)
+func (m *Migrator) updateTenantsFrozenOffloadToHot(ctx context.Context, idx *Index, shards []string,
+) (commit func(success bool), err error) {
+	// do nothing
+	return commitNoop, nil
+}
+
+// // init frozen -> hot (1st step, to intermediate status)
+// func (m *Migrator) updateTenantsFrozenToFrozenLoad() (commit func(success bool), err error) {
+
+// }
+
+// // commit frozen -> hot (2nd step, to final status)
+// func (m *Migrator) updateTenantsFrozenLoadToHot() (commit func(success bool), err error) {
+
+// }
+
+// // revert frozen -> hot (to initial status)
+// func (m *Migrator) updateTenantsFrozenLoadToFrozen() (commit func(success bool), err error) {
+
+// }
 
 // DeleteTenants deletes tenants and returns a commit func
 // that can be used to either commit or rollback deletion
