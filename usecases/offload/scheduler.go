@@ -36,8 +36,8 @@ type Scheduler struct {
 	// deps
 	logger     logrus.FieldLogger
 	authorizer authorizer
-	offloader  *coordinator
-	onloader   *coordinator
+	offloader  *offloadCoordinator
+	onloader   *loadCoordinator
 	backends   OffloadBackendProvider
 }
 
@@ -45,7 +45,7 @@ type Scheduler struct {
 func NewScheduler(
 	authorizer authorizer,
 	client client,
-	sourcer selector,
+	selector selector,
 	backends OffloadBackendProvider,
 	nodeResolver nodeResolver,
 	logger logrus.FieldLogger,
@@ -54,14 +54,10 @@ func NewScheduler(
 		logger:     logger,
 		authorizer: authorizer,
 		backends:   backends,
-		offloader: newCoordinator(
-			sourcer,
-			client,
-			logger, nodeResolver),
-		onloader: newCoordinator(
-			sourcer,
-			client,
-			logger, nodeResolver),
+		offloader: newOffloadCoordinator(
+			selector, client, logger, nodeResolver),
+		onloader: newLoadCoordinator(
+			client, logger, nodeResolver),
 	}
 	return m
 }
@@ -375,7 +371,7 @@ func (s *Scheduler) validateRestoreRequest(ctx context.Context, store coordStore
 	// 	return nil, fmt.Errorf("class list 'include' contains duplicate: %s", dup)
 	// }
 	destPath := store.HomeDir()
-	meta, err := store.Meta(ctx, GlobalOffloadFile)
+	meta, err := store.Meta(ctx, OffloadFile)
 	if err != nil {
 		notFoundErr := offload.ErrNotFound{}
 		if errors.As(err, &notFoundErr) {

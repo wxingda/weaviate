@@ -18,39 +18,23 @@ import (
 
 // NodeDescriptor contains data related to one participant in DBRO
 type NodeDescriptor struct {
-	// Class  string `json:"class"`
-	// Tenant string `json:"tenant"`
 	Status Status `json:"status"`
 	Error  string `json:"error"`
 }
 
 type OffloadDistributedDescriptor struct {
+	ID            string                     `json:"id"`
+	Class         string                     `json:"class"`
+	Tenant        string                     `json:"tenant"`
 	StartedAt     time.Time                  `json:"startedAt"`
 	CompletedAt   time.Time                  `json:"completedAt"`
-	ID            string                     `json:"id"`
+	Status        Status                     `json:"status"`
 	Nodes         map[string]*NodeDescriptor `json:"nodes"`
 	NodeMapping   map[string]string          `json:"node_mapping"`
-	Status        Status                     `json:"status"`
 	Version       string                     `json:"version"`
 	ServerVersion string                     `json:"serverVersion"`
 	Error         string                     `json:"error"`
-
-	Class  string `json:"class"`
-	Tenant string `json:"tenant"`
 }
-
-// // DistributedBAckupDescriptor contains everything need to completely restore a distributed backup
-// type DistributedBackupDescriptor struct {
-// 	StartedAt     time.Time                  `json:"startedAt"`
-// 	CompletedAt   time.Time                  `json:"completedAt"`
-// 	ID            string                     `json:"id"` // User created backup id
-// 	Nodes         map[string]*NodeDescriptor `json:"nodes"`
-// 	NodeMapping   map[string]string          `json:"node_mapping"`
-// 	Status        Status                     `json:"status"`  //
-// 	Version       string                     `json:"version"` //
-// 	ServerVersion string                     `json:"serverVersion"`
-// 	Error         string                     `json:"error"`
-// }
 
 // // Len returns how many nodes exist in d
 // func (d *DistributedBackupDescriptor) Len() int {

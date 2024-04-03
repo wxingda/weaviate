@@ -20,10 +20,10 @@ import (
 	"time"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
+	"github.com/weaviate/weaviate/usecases/config"
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/offload"
-	"github.com/weaviate/weaviate/usecases/config"
 )
 
 // Op is the kind of a offload operation
@@ -65,6 +65,228 @@ type selector interface {
 	TenantNodes(ctx context.Context, class string, tenant string) ([]string, error)
 }
 
+type offloadCoordinator struct {
+	coordinator
+	selector selector
+}
+
+// newcoordinator creates an instance which coordinates distributed BRO operations among many shards.
+func newOffloadCoordinator(
+	selector selector,
+	client client,
+	log logrus.FieldLogger,
+	nodeResolver nodeResolver,
+) *offloadCoordinator {
+	c := &offloadCoordinator{
+		selector: selector,
+		coordinator: coordinator{
+			client:             client,
+			log:                log,
+			nodeResolver:       nodeResolver,
+			ops:                newOperations(),
+			timeoutNodeDown:    _TimeoutNodeDown,
+			timeoutQueryStatus: _TimeoutQueryStatus,
+			timeoutCanCommit:   _TimeoutCanCommit,
+			timeoutNextRound:   _NextRoundPeriod,
+		},
+	}
+	c.startWorkers(_MaxCoordWorkers, c.handleJob)
+
+	return c
+}
+
+// Backup coordinates a distributed backup among participants
+func (c *offloadCoordinator) Offload(ctx context.Context, store coordStore,
+	req *Request, callback func(status offload.Status),
+) error {
+	// make sure there is no same active offload
+	if _, exists := c.ops.renew(req.ID, store.HomeDir()); exists {
+		return fmt.Errorf("offload %s already in progress", req.ID)
+	}
+
+	nodes, err := c.groupByNode(ctx, req.Class, req.Tenant)
+	if err != nil {
+		return err
+	}
+
+	descriptor := &offload.OffloadDistributedDescriptor{
+		ID:            req.ID,
+		Class:         req.Class,
+		Tenant:        req.Tenant,
+		StartedAt:     time.Now().UTC(),
+		Status:        offload.Started,
+		Nodes:         nodes,
+		Version:       Version,
+		ServerVersion: config.ServerVersion,
+	}
+
+	errCh := make(chan error, 1)
+	c.jobsCh <- job{
+		descriptor: descriptor,
+		req:        req,
+		store:      store,
+		ctx:        ctx,
+		errCh:      errCh,
+		callback:   callback,
+	}
+
+	return <-errCh
+}
+
+func (c *offloadCoordinator) groupByNode(ctx context.Context, class string, tenant string) (nodeMap, error) {
+	m := make(nodeMap, 8)
+
+	nodes, err := c.selector.TenantNodes(ctx, class, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("class %q, tenant %q: %w", class, tenant, errTenantNotFound)
+	}
+
+	for _, node := range nodes {
+		m[node] = &offload.NodeDescriptor{}
+	}
+	return m, nil
+}
+
+func (c *offloadCoordinator) handleJob(j job) {
+	j.errCh <- func() error {
+		hosts, err := c.canCommit(j.ctx, j.req, j.descriptor)
+		if err != nil {
+			c.ops.reset(j.req.ID)
+			return err
+		}
+
+		if err := j.store.PutMeta(j.ctx, OffloadFile, j.descriptor); err != nil {
+			c.ops.reset(j.req.ID)
+			return fmt.Errorf("cannot init meta file: %w", err)
+		}
+
+		statusReq := StatusRequest{
+			Method:  OpOffload,
+			ID:      j.req.ID,
+			Backend: j.req.Backend,
+		}
+
+		f := func() {
+			defer c.ops.reset(j.req.ID)
+			ctx := context.Background()
+
+			c.commit(ctx, &statusReq, hosts, j.descriptor)
+			logFields := logrus.Fields{
+				"action":     OpOffload,
+				"offload_id": j.req.ID,
+				"class":      j.req.Class,
+				"tenant":     j.req.Tenant,
+			}
+			if err := j.store.PutMeta(ctx, OffloadFile, j.descriptor); err != nil {
+				c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
+			}
+			if j.descriptor.Status == offload.Success {
+				c.log.WithFields(logFields).Info("coordinator: offload completed successfully")
+			} else {
+				c.log.WithFields(logFields).Errorf("coordinator: %s", j.descriptor.Error)
+			}
+			j.callback(j.descriptor.Status)
+		}
+		enterrors.GoWrapper(f, c.log)
+		return nil
+	}()
+	close(j.errCh)
+}
+
+type loadCoordinator struct {
+	coordinator
+}
+
+// newcoordinator creates an instance which coordinates distributed BRO operations among many shards.
+func newLoadCoordinator(
+	client client,
+	log logrus.FieldLogger,
+	nodeResolver nodeResolver,
+) *loadCoordinator {
+	c := &loadCoordinator{
+		coordinator: coordinator{
+			client:             client,
+			log:                log,
+			nodeResolver:       nodeResolver,
+			ops:                newOperations(),
+			timeoutNodeDown:    _TimeoutNodeDown,
+			timeoutQueryStatus: _TimeoutQueryStatus,
+			timeoutCanCommit:   _TimeoutCanCommit,
+			timeoutNextRound:   _NextRoundPeriod,
+		},
+	}
+	c.startWorkers(_MaxCoordWorkers, c.handleJob)
+
+	return c
+}
+
+// Restore coordinates a distributed restoration among participants
+func (c *loadCoordinator) Load(ctx context.Context, store coordStore, req *Request,
+	desc *offload.OffloadDistributedDescriptor, callback func(status offload.Status),
+) error {
+	// make sure there is no same active load
+	if _, exists := c.ops.renew(req.ID, store.HomeDir()); exists {
+		return fmt.Errorf("load %s already in progress", req.ID)
+	}
+
+	descriptor := desc.ResetStatus()
+
+	errCh := make(chan error, 1)
+	c.jobsCh <- job{
+		descriptor: descriptor,
+		req:        req,
+		store:      store,
+		ctx:        ctx,
+		errCh:      errCh,
+		callback:   callback,
+	}
+	return <-errCh
+}
+
+func (c *coordinator) handleJob(j job) {
+	j.errCh <- func() error {
+		nodes, err := c.canCommit(j.ctx, j.req, j.descriptor)
+		if err != nil {
+			c.ops.reset(j.req.ID)
+			return err
+		}
+
+		// initial put so restore status is immediately available
+		if err := j.store.PutMeta(j.ctx, LoadFile, j.descriptor); err != nil {
+			c.ops.reset(j.req.ID)
+			req := &AbortRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
+			c.abortAll(j.ctx, req, nodes)
+			return fmt.Errorf("put initial metadata: %w", err)
+		}
+
+		statusReq := StatusRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
+		g := func() {
+			defer c.ops.reset(j.req.ID)
+			ctx := context.Background()
+
+			c.commit(ctx, &statusReq, nodes, j.descriptor)
+			logFields := logrus.Fields{
+				"action":  OpLoad,
+				"load_id": j.req.ID,
+				"class":   j.req.Class,
+				"tenant":  j.req.Tenant,
+			}
+			if err := j.store.PutMeta(ctx, LoadFile, j.descriptor); err != nil {
+				c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
+			}
+			if j.descriptor.Status == offload.Success {
+				c.log.WithFields(logFields).Info("coordinator: backup restored successfully")
+			} else {
+				c.log.WithFields(logFields).Errorf("coordinator: %v", j.descriptor.Error)
+			}
+			j.callback(j.descriptor.Status)
+		}
+		enterrors.GoWrapper(g, c.log)
+		return nil
+	}()
+	close(j.errCh)
+}
+
 // coordinator coordinates a distributed backup and restore operation (DBRO):
 //
 // - It determines what request to send to which shard.
@@ -82,14 +304,13 @@ type selector interface {
 // - The coordinator will try to repair previous DBROs whenever it is possible
 type coordinator struct {
 	// dependencies
-	selector     selector
 	client       client
 	log          logrus.FieldLogger
 	nodeResolver nodeResolver
 
 	// state
-	jobsChan chan job
-	ops      *operations
+	jobsCh chan job
+	ops    *operations
 
 	// timeouts
 	timeoutNodeDown    time.Duration
@@ -98,299 +319,21 @@ type coordinator struct {
 	timeoutNextRound   time.Duration
 }
 
-type job struct {
-	descriptor *offload.OffloadDistributedDescriptor
-	req        *Request
-	store      coordStore
-	ctx        context.Context
-	errCh      chan<- error
-	callback   func(status offload.Status) // TODO AL verify argument
-}
-
-type operations struct {
-	m map[string]reqStat
-	sync.Mutex
-}
-
-func newOperations() *operations {
-	return &operations{m: make(map[string]reqStat)}
-}
-
-func (o *operations) renew(id string, path string) (reqStat, bool) {
-	o.Lock()
-	defer o.Unlock()
-
-	if rs, ok := o.m[id]; ok {
-		return rs, true
-	}
-
-	// TODO AL verify if all fields needed
-	rs := reqStat{
-		ID:        id,
-		Path:      path,
-		StartTime: time.Now().UTC(),
-		Status:    offload.Started,
-	}
-	o.m[id] = rs
-	return rs, false
-}
-
-func (o *operations) reset(id string) {
-	o.Lock()
-	defer o.Unlock()
-
-	delete(o.m, id)
-}
-
-// newcoordinator creates an instance which coordinates distributed BRO operations among many shards.
-func newCoordinator(
-	selector selector,
-	client client,
-	log logrus.FieldLogger,
-	nodeResolver nodeResolver,
-) *coordinator {
-	c := &coordinator{
-		selector:           selector,
-		client:             client,
-		log:                log,
-		nodeResolver:       nodeResolver,
-		timeoutNodeDown:    _TimeoutNodeDown,
-		timeoutQueryStatus: _TimeoutQueryStatus,
-		timeoutCanCommit:   _TimeoutCanCommit,
-		timeoutNextRound:   _NextRoundPeriod,
-		ops:                newOperations(),
-	}
-	c.startWorkers(_MaxCoordWorkers)
-
-	return c
-}
-
-func (c *coordinator) startWorkers(maxWorkers int) {
-	c.jobsChan = make(chan job, maxWorkers*2)
+func (c *coordinator) startWorkers(maxWorkers int, handler func(j job)) {
+	c.jobsCh = make(chan job, maxWorkers*2)
 
 	enterrors.GoWrapper(func() {
 		eg := enterrors.NewErrorGroupWrapper(c.log)
 		eg.SetLimit(maxWorkers)
 
-		for j := range c.jobsChan {
+		for j := range c.jobsCh {
 			eg.Go(func() error {
-				c.handleJob(j)
+				handler(j)
 				return nil
 			})
 		}
 	}, c.log)
 }
-
-// Backup coordinates a distributed backup among participants
-func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Request,
-	finishedCallback func(status offload.Status),
-) error {
-	if _, exists := c.ops.renew(req.ID, store.HomeDir()); exists {
-		return fmt.Errorf("offload %s already in progress", req.ID)
-	}
-
-	// // make sure there is no active backup
-	// if prevID := c.lastOp.renew(req.ID, store.HomeDir()); prevID != "" {
-	// 	return fmt.Errorf("offload %s already in progress", prevID)
-	// }
-
-	nodes, err := c.groupByNode(ctx, req.Class, req.Tenant)
-	if err != nil {
-		return err
-	}
-
-	descriptor := &offload.OffloadDistributedDescriptor{
-		StartedAt:     time.Now().UTC(),
-		Status:        offload.Started,
-		ID:            req.ID,
-		Class:         req.Class,
-		Tenant:        req.Tenant,
-		Nodes:         nodes,
-		Version:       Version,
-		ServerVersion: config.ServerVersion,
-	}
-
-	errCh := make(chan error, 1)
-	c.jobsChan <- job{
-		descriptor: descriptor,
-		req:        req,
-		store:      store,
-		ctx:        ctx,
-		errCh:      errCh,
-		callback:   finishedCallback,
-	}
-
-	return <-errCh
-}
-
-// Restore coordinates a distributed restoration among participants
-func (c *coordinator) Load(
-	ctx context.Context,
-	store coordStore,
-	req *Request,
-	desc *offload.OffloadDistributedDescriptor,
-	finishedCallback func(status offload.Status),
-) error {
-	if _, exists := c.ops.renew(req.ID, store.HomeDir()); exists {
-		return fmt.Errorf("load %s already in progress", req.ID)
-	}
-
-	// req.Method = OpRestore
-	// make sure there is no active backup
-	// if prevID := c.lastOp.renew(desc.ID, store.HomeDir()); prevID != "" {
-	// 	return fmt.Errorf("restoration %s already in progress", prevID)
-	// }
-
-	// for key := range c.Participants {
-	// 	delete(c.Participants, key)
-	// }
-
-	descriptor := desc.ResetStatus()
-
-	errCh := make(chan error, 1)
-	c.jobsChan <- job{
-		descriptor: descriptor,
-		req:        req,
-		store:      store,
-		ctx:        ctx,
-		errCh:      errCh,
-		callback:   finishedCallback,
-	}
-	return <-errCh
-}
-
-func (c *coordinator) handleJob(j job) {
-	switch j.req.Method {
-	case OpOffload:
-		c.handleOffloadJob(j)
-	case OpLoad:
-		c.handleLoadJob(j)
-	}
-}
-
-func (c *coordinator) handleOffloadJob(j job) {
-	send := func(err error) {
-		j.errCh <- err
-		close(j.errCh)
-	}
-
-	hosts, err := c.canCommit(j.ctx, j.req, j.descriptor)
-	if err != nil {
-		c.ops.reset(j.req.ID)
-		send(err)
-		return
-	}
-
-	if err := j.store.PutMeta(j.ctx, GlobalOffloadFile, j.descriptor); err != nil {
-		c.ops.reset(j.req.ID)
-		send(fmt.Errorf("cannot init meta file: %w", err))
-		return
-	}
-
-	statusReq := StatusRequest{
-		Method:  OpOffload,
-		ID:      j.req.ID,
-		Backend: j.req.Backend,
-	}
-
-	f := func() {
-		defer c.ops.reset(j.req.ID)
-		ctx := context.Background()
-
-		c.commit(ctx, &statusReq, hosts, j.descriptor)
-		logFields := logrus.Fields{
-			"action":     OpOffload,
-			"offload_id": j.req.ID,
-			"class":      j.req.Class,
-			"tenant":     j.req.Tenant,
-		}
-		if err := j.store.PutMeta(ctx, GlobalOffloadFile, j.descriptor); err != nil {
-			c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
-		}
-		if j.descriptor.Status == offload.Success {
-			c.log.WithFields(logFields).Info("coordinator: offload completed successfully")
-		} else {
-			c.log.WithFields(logFields).Errorf("coordinator: %s", j.descriptor.Error)
-		}
-		j.callback(j.descriptor.Status)
-	}
-	enterrors.GoWrapper(f, c.log)
-	send(nil)
-}
-
-func (c *coordinator) handleLoadJob(j job) {
-	send := func(err error) {
-		j.errCh <- err
-		close(j.errCh)
-	}
-
-	nodes, err := c.canCommit(j.ctx, j.req, j.descriptor)
-	if err != nil {
-		c.ops.reset(j.req.ID)
-		send(err)
-		return
-	}
-
-	// initial put so restore status is immediately available
-	if err := j.store.PutMeta(j.ctx, GlobalOnloadFile, j.descriptor); err != nil {
-		c.ops.reset(j.req.ID)
-		req := &AbortRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
-		c.abortAll(j.ctx, req, nodes)
-		send(fmt.Errorf("put initial metadata: %w", err))
-		return
-	}
-
-	statusReq := StatusRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
-	g := func() {
-		defer c.ops.reset(j.req.ID)
-		ctx := context.Background()
-
-		c.commit(ctx, &statusReq, nodes, j.descriptor)
-		logFields := logrus.Fields{
-			"action":  OpLoad,
-			"load_id": j.req.ID,
-			"class":   j.req.Class,
-			"tenant":  j.req.Tenant,
-		}
-		if err := j.store.PutMeta(ctx, GlobalOnloadFile, j.descriptor); err != nil {
-			c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
-		}
-		if j.descriptor.Status == offload.Success {
-			c.log.WithFields(logFields).Info("coordinator: backup restored successfully")
-		} else {
-			c.log.WithFields(logFields).Errorf("coordinator: %v", j.descriptor.Error)
-		}
-		j.callback(j.descriptor.Status)
-	}
-	enterrors.GoWrapper(g, c.log)
-	send(nil)
-}
-
-// func (c *coordinator) OnStatus(ctx context.Context, store coordStore, req *StatusRequest) (*Status, error) {
-// 	// check if backup is still active
-// 	st := c.lastOp.get()
-// 	if st.ID == req.ID {
-// 		return &Status{Path: st.Path, StartedAt: st.Starttime, Status: st.Status}, nil
-// 	}
-// 	filename := GlobalBackupFile
-// 	if req.Method == OpRestore {
-// 		filename = GlobalOnloadFile
-// 	}
-// 	// The backup might have been already created.
-// 	meta, err := store.Meta(ctx, filename)
-// 	if err != nil {
-// 		path := fmt.Sprintf("%s/%s", req.ID, filename)
-// 		return nil, fmt.Errorf("coordinator cannot get status: %w: %q: %v", errMetaNotFound, path, err)
-// 	}
-
-// 	return &Status{
-// 		Path:        store.HomeDir(),
-// 		StartedAt:   meta.StartedAt,
-// 		CompletedAt: meta.CompletedAt,
-// 		Status:      meta.Status,
-// 		Err:         meta.Error,
-// 	}, nil
-// }
 
 // canCommit asks candidates if they agree to participate in DBRO
 // It returns and error if any candidates refuses to participate
@@ -619,19 +562,48 @@ func (c *coordinator) abortAll(ctx context.Context, req *AbortRequest, nodes map
 	}
 }
 
-// groupByShard returns classes group by nodes
-func (c *coordinator) groupByNode(ctx context.Context, class string, tenant string) (nodeMap, error) {
-	m := make(nodeMap, 8)
+type operations struct {
+	m map[string]reqStat
+	sync.Mutex
+}
 
-	nodes, err := c.selector.TenantNodes(ctx, class, tenant)
-	if err != nil {
-		return nil, fmt.Errorf("class %q, tenant %q: %w", class, tenant, errTenantNotFound)
+func newOperations() *operations {
+	return &operations{m: make(map[string]reqStat)}
+}
+
+func (o *operations) renew(id string, path string) (reqStat, bool) {
+	o.Lock()
+	defer o.Unlock()
+
+	if rs, ok := o.m[id]; ok {
+		return rs, true
 	}
 
-	for _, node := range nodes {
-		m[node] = &offload.NodeDescriptor{}
+	// TODO AL verify if all fields needed
+	rs := reqStat{
+		ID:        id,
+		Path:      path,
+		StartTime: time.Now().UTC(),
+		Status:    offload.Started,
 	}
-	return m, nil
+	o.m[id] = rs
+	return rs, false
+}
+
+func (o *operations) reset(id string) {
+	o.Lock()
+	defer o.Unlock()
+
+	delete(o.m, id)
+}
+
+type job struct {
+	descriptor *offload.OffloadDistributedDescriptor
+	req        *Request
+	store      coordStore
+	ctx        context.Context
+	errCh      chan<- error
+	callback   func(status offload.Status) // TODO AL verify argument
 }
 
 // partialStatus tracks status of a single backup operation
