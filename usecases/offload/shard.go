@@ -26,7 +26,7 @@ const (
 )
 
 type reqStat struct {
-	Starttime time.Time
+	StartTime time.Time
 	ID        string
 	Status    offload.Status
 	Path      string
@@ -53,7 +53,7 @@ func (s *offloadStat) renew(id string, path string) string {
 	}
 	s.reqStat.ID = id
 	s.reqStat.Path = path
-	s.reqStat.Starttime = time.Now().UTC()
+	s.reqStat.StartTime = time.Now().UTC()
 	s.reqStat.Status = offload.Started
 	return ""
 }

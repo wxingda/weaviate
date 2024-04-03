@@ -92,7 +92,7 @@ func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *Offl
 		return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
 	}
 	breq := Request{
-		Method:      OpCreate,
+		Method:      OpOffload,
 		Backend:     req.Backend,
 		Class:       req.Class,
 		Tenant:      req.Tenant,
@@ -144,7 +144,7 @@ func (s *Scheduler) OffloadSimple(ctx context.Context, req *OffloadRequest,
 		// return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
 	}
 	breq := Request{
-		Method:      OpCreate,
+		Method:      OpOffload,
 		Backend:     req.Backend,
 		Class:       req.Class,
 		Tenant:      req.Tenant,
@@ -200,14 +200,14 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 	}
 
 	rReq := Request{
-		Method:      OpRestore,
+		Method:      OpLoad,
 		ID:          req.ID(),
 		Backend:     req.Backend,
 		Compression: req.Compression,
 		Class:       req.Class,
 		Tenant:      req.Tenant,
 	}
-	err = s.onloader.Onload(ctx, store, &rReq, meta, func(status offload.Status) {})
+	err = s.onloader.Load(ctx, store, &rReq, meta, func(status offload.Status) {})
 	if err != nil {
 		status = string(offload.Failed)
 		data.Error = err.Error()
@@ -251,14 +251,14 @@ func (s *Scheduler) OnloadSimple(ctx context.Context, req *OffloadRequest,
 	// }
 
 	rReq := Request{
-		Method:      OpRestore,
+		Method:      OpLoad,
 		ID:          req.ID(),
 		Backend:     req.Backend,
 		Compression: req.Compression,
 		Class:       req.Class,
 		Tenant:      req.Tenant,
 	}
-	err = s.onloader.Onload(ctx, store, &rReq, meta, callback)
+	err = s.onloader.Load(ctx, store, &rReq, meta, callback)
 	if err != nil {
 		// status = string(offload.Failed)
 		// data.Error = err.Error()

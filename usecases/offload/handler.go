@@ -138,7 +138,7 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 	nodeName := m.node
 	// If we are doing a restore and have a nodeMapping specified, ensure we use the "old" node name from the backup to retrieve/store the
 	// backup information.
-	if req.Method == OpRestore {
+	if req.Method == OpLoad {
 		for oldNodeName, newNodeName := range req.NodeMapping {
 			if nodeName == newNodeName {
 				nodeName = oldNodeName
@@ -153,7 +153,7 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 	}
 
 	switch req.Method {
-	case OpCreate:
+	case OpOffload:
 		// if err := m.backupper.sourcer.Backupable(ctx, req.Classes); err != nil {
 		// 	ret.Err = err.Error()
 		// 	return ret
@@ -168,7 +168,7 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 			return ret
 		}
 		ret.Timeout = res.Timeout
-	case OpRestore:
+	case OpLoad:
 		meta, err := m.restorer.validate(ctx, &store, req)
 		if err != nil {
 			ret.Err = err.Error()
@@ -191,9 +191,9 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 // OnCommit will be triggered when the coordinator confirms the execution of a previous operation
 func (m *Handler) OnCommit(ctx context.Context, req *StatusRequest) (err error) {
 	switch req.Method {
-	case OpCreate:
+	case OpOffload:
 		return m.backupper.OnCommit(ctx, req)
-	case OpRestore:
+	case OpLoad:
 		return m.restorer.OnCommit(ctx, req)
 	default:
 		return fmt.Errorf("%w: %s", errUnknownOp, req.Method)
@@ -203,9 +203,9 @@ func (m *Handler) OnCommit(ctx context.Context, req *StatusRequest) (err error) 
 // OnAbort will be triggered when the coordinator abort the execution of a previous operation
 func (m *Handler) OnAbort(ctx context.Context, req *AbortRequest) error {
 	switch req.Method {
-	case OpCreate:
+	case OpOffload:
 		return m.backupper.OnAbort(ctx, req)
-	case OpRestore:
+	case OpLoad:
 		return m.restorer.OnAbort(ctx, req)
 	default:
 		return fmt.Errorf("%w: %s", errUnknownOp, req.Method)
@@ -219,14 +219,14 @@ func (m *Handler) OnStatus(ctx context.Context, req *StatusRequest) *StatusRespo
 		ID:     req.ID,
 	}
 	switch req.Method {
-	case OpCreate:
+	case OpOffload:
 		st, err := m.backupper.OnStatus(ctx, req)
 		ret.Status = st.Status
 		if err != nil {
 			ret.Status = offload.Failed
 			ret.Err = err.Error()
 		}
-	case OpRestore:
+	case OpLoad:
 		st, err := m.restorer.status(req.Backend, req.ID)
 		ret.Status = st.Status
 		ret.Err = st.Err
