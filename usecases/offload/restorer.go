@@ -66,7 +66,7 @@ func (r *restorer) restore(ctx context.Context,
 		expiration = _TimeoutShardCommit
 	}
 	ret := CanCommitResponse{
-		Method:  OpCreate,
+		Method:  OpOffload,
 		ID:      req.ID,
 		Timeout: expiration,
 	}
@@ -180,7 +180,7 @@ func (r *restorer) status(backend, ID string) (Status, error) {
 	if st := r.lastOp.get(); st.ID == ID {
 		return Status{
 			Path:      st.Path,
-			StartedAt: st.Starttime,
+			StartedAt: st.StartTime,
 			Status:    st.Status,
 		}, nil
 	}

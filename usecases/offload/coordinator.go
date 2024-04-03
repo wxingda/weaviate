@@ -30,8 +30,8 @@ import (
 type Op string
 
 const (
-	OpCreate  Op = "create"
-	OpRestore Op = "restore"
+	OpOffload Op = "offload"
+	OpLoad    Op = "load"
 )
 
 var (
@@ -48,8 +48,7 @@ const (
 	_TimeoutCanCommit   = 8 * time.Second
 	_NextRoundPeriod    = 10 * time.Second
 	_MaxNumberConns     = 16
-
-	_MaxNumberWorkers = 32
+	_MaxCoordWorkers    = 16
 )
 
 type nodeMap map[string]*offload.NodeDescriptor
@@ -63,15 +62,6 @@ type participantStatus struct {
 
 // selector is used to select participant nodes
 type selector interface {
-	// // Shards gets all nodes on which this class is sharded
-	// Shards(ctx context.Context, class string) ([]string, error)
-	// // ListClasses returns a list of all existing classes
-	// // This will be needed if user doesn't include any classes
-	// ListClasses(ctx context.Context) []string
-
-	// // Backupable returns whether all given class can be backed up.
-	// Backupable(_ context.Context, classes []string) error
-
 	TenantNodes(ctx context.Context, class string, tenant string) ([]string, error)
 }
 
@@ -98,12 +88,6 @@ type coordinator struct {
 	nodeResolver nodeResolver
 
 	// state
-	// Participants map[string]participantStatus
-	// descriptor   *offload.OffloadDistributedDescriptor
-	// shardSyncChan
-	// chans map[string]shardSyncChan
-
-	// maxWorkers int
 	jobsChan chan job
 	ops      *operations
 
@@ -129,9 +113,7 @@ type operations struct {
 }
 
 func newOperations() *operations {
-	return &operations{
-		m: make(map[string]reqStat),
-	}
+	return &operations{m: make(map[string]reqStat)}
 }
 
 func (o *operations) renew(id string, path string) (reqStat, bool) {
@@ -146,7 +128,7 @@ func (o *operations) renew(id string, path string) (reqStat, bool) {
 	rs := reqStat{
 		ID:        id,
 		Path:      path,
-		Starttime: time.Now().UTC(),
+		StartTime: time.Now().UTC(),
 		Status:    offload.Started,
 	}
 	o.m[id] = rs
@@ -159,11 +141,6 @@ func (o *operations) reset(id string) {
 
 	delete(o.m, id)
 }
-
-// type syncChans struct {
-// 	m map[string]shardSyncChan
-// 	l *sync.Mutex
-// }
 
 // newcoordinator creates an instance which coordinates distributed BRO operations among many shards.
 func newCoordinator(
@@ -181,13 +158,9 @@ func newCoordinator(
 		timeoutQueryStatus: _TimeoutQueryStatus,
 		timeoutCanCommit:   _TimeoutCanCommit,
 		timeoutNextRound:   _NextRoundPeriod,
-
-		// maxWorkers: _MaxNumberWorkers,
-		// jobsChan: make(chan job, _MaxNumberWorkers*2),
-		ops: newOperations(),
+		ops:                newOperations(),
 	}
-
-	c.startWorkers(_MaxNumberWorkers)
+	c.startWorkers(_MaxCoordWorkers)
 
 	return c
 }
@@ -248,15 +221,10 @@ func (c *coordinator) Offload(ctx context.Context, store coordStore, req *Reques
 	}
 
 	return <-errCh
-
-	// for key := range c.Participants {
-	// 	delete(c.Participants, key)
-	// }
-
 }
 
 // Restore coordinates a distributed restoration among participants
-func (c *coordinator) Onload(
+func (c *coordinator) Load(
 	ctx context.Context,
 	store coordStore,
 	req *Request,
@@ -264,7 +232,7 @@ func (c *coordinator) Onload(
 	finishedCallback func(status offload.Status),
 ) error {
 	if _, exists := c.ops.renew(req.ID, store.HomeDir()); exists {
-		return fmt.Errorf("offload %s already in progress", req.ID)
+		return fmt.Errorf("load %s already in progress", req.ID)
 	}
 
 	// req.Method = OpRestore
@@ -293,9 +261,9 @@ func (c *coordinator) Onload(
 
 func (c *coordinator) handleJob(j job) {
 	switch j.req.Method {
-	case OpCreate:
+	case OpOffload:
 		c.handleOffloadJob(j)
-	case OpRestore:
+	case OpLoad:
 		c.handleLoadJob(j)
 	}
 }
@@ -320,7 +288,7 @@ func (c *coordinator) handleOffloadJob(j job) {
 	}
 
 	statusReq := StatusRequest{
-		Method:  OpCreate,
+		Method:  OpOffload,
 		ID:      j.req.ID,
 		Backend: j.req.Backend,
 	}
@@ -331,7 +299,7 @@ func (c *coordinator) handleOffloadJob(j job) {
 
 		c.commit(ctx, &statusReq, hosts, j.descriptor)
 		logFields := logrus.Fields{
-			"action":     OpCreate,
+			"action":     OpOffload,
 			"offload_id": j.req.ID,
 			"class":      j.req.Class,
 			"tenant":     j.req.Tenant,
@@ -350,7 +318,6 @@ func (c *coordinator) handleOffloadJob(j job) {
 	send(nil)
 }
 
-// offload job
 func (c *coordinator) handleLoadJob(j job) {
 	send := func(err error) {
 		j.errCh <- err
@@ -367,20 +334,20 @@ func (c *coordinator) handleLoadJob(j job) {
 	// initial put so restore status is immediately available
 	if err := j.store.PutMeta(j.ctx, GlobalOnloadFile, j.descriptor); err != nil {
 		c.ops.reset(j.req.ID)
-		req := &AbortRequest{Method: OpRestore, ID: j.req.ID, Backend: j.req.Backend}
+		req := &AbortRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
 		c.abortAll(j.ctx, req, nodes)
 		send(fmt.Errorf("put initial metadata: %w", err))
 		return
 	}
 
-	statusReq := StatusRequest{Method: OpRestore, ID: j.req.ID, Backend: j.req.Backend}
+	statusReq := StatusRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
 	g := func() {
 		defer c.ops.reset(j.req.ID)
 		ctx := context.Background()
 
 		c.commit(ctx, &statusReq, nodes, j.descriptor)
 		logFields := logrus.Fields{
-			"action":  OpRestore,
+			"action":  OpLoad,
 			"load_id": j.req.ID,
 			"class":   j.req.Class,
 			"tenant":  j.req.Tenant,

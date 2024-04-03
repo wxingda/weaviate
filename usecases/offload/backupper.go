@@ -111,7 +111,7 @@ func (b *backupper) OnStatus(ctx context.Context, req *StatusRequest) (reqStat, 
 	}
 
 	return reqStat{
-		Starttime: meta.StartedAt,
+		StartTime: meta.StartedAt,
 		ID:        req.ID,
 		Path:      store.HomeDir(),
 		Status:    offload.Status(meta.Status),
@@ -131,7 +131,7 @@ func (b *backupper) backup(ctx context.Context,
 		expiration = _TimeoutShardCommit
 	}
 	ret := CanCommitResponse{
-		Method:  OpCreate,
+		Method:  OpOffload,
 		ID:      req.ID,
 		Timeout: expiration,
 	}
