@@ -187,11 +187,6 @@ func newUploader(sourcer Sourcer, backend nodeStore,
 	}
 }
 
-func (u *uploader) withCompression(cfg zipConfig) *uploader {
-	u.zipConfig = cfg
-	return u
-}
-
 // all uploads all files in addition to the metadata file
 func (u *uploader) all(ctx context.Context, class string, tenant string, desc *offload.OffloadNodeDescriptor) (err error) {
 	u.setStatus(offload.Transferring)
@@ -421,14 +416,9 @@ func newFileWriter(sourcer Sourcer, backend nodeStore,
 		destDir:    destDir,
 		tempDir:    path.Join(destDir, _TempDirectory),
 		movedFiles: make([]string, 0, 64),
-		GoPoolSize: routinePoolSize(50),
+		GoPoolSize: routinePoolSize(DefaultCPUPercentage),
 		logger:     logger,
 	}
-}
-
-func (fw *fileWriter) WithPoolPercentage(p int) *fileWriter {
-	fw.GoPoolSize = routinePoolSize(p)
-	return fw
 }
 
 // Write downloads files and put them in the destination directory

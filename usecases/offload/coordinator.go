@@ -385,7 +385,6 @@ func (c *coordinator) canCommit(ctx context.Context, req *Request,
 					Tenant:      req.Tenant,
 					Duration:    _BookingPeriod,
 					NodeMapping: nodeMapping,
-					Compression: req.Compression,
 				},
 			}
 		}

@@ -150,8 +150,7 @@ func (b *backupper) backup(ctx context.Context,
 			return
 
 		}
-		uploader := newUploader(b.sourcer, store, b.lastOp.set, b.logger).
-			withCompression(newZipConfig(req.Compression))
+		uploader := newUploader(b.sourcer, store, b.lastOp.set, b.logger)
 
 		result := offload.OffloadNodeDescriptor{
 			StartedAt:     time.Now().UTC(),

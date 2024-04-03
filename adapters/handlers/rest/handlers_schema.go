@@ -279,6 +279,7 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 		}
 
 		for _, o := range offloads {
+			o := o
 			req := &offload.OffloadRequest{
 				Class:       params.ClassName,
 				Tenant:      o.Name,
@@ -328,6 +329,7 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 			ChunkSize:     offload.DefaultChunkSize,
 		}
 		for _, l := range loads {
+			l := l
 			req := &offload.OffloadRequest{
 				Class:       params.ClassName,
 				Tenant:      l.Name,

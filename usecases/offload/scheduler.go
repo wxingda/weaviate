@@ -88,12 +88,11 @@ func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *Offl
 		return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
 	}
 	breq := Request{
-		Method:      OpOffload,
-		Backend:     req.Backend,
-		Class:       req.Class,
-		Tenant:      req.Tenant,
-		Compression: req.Compression,
-		ID:          req.ID(),
+		Method:  OpOffload,
+		Backend: req.Backend,
+		Class:   req.Class,
+		Tenant:  req.Tenant,
+		ID:      req.ID(),
 	}
 	if err := s.offloader.Offload(ctx, store, &breq, func(_ offload.Status) {}); err != nil {
 		return nil, offload.NewErrUnprocessable(err)
@@ -140,12 +139,11 @@ func (s *Scheduler) OffloadSimple(ctx context.Context, req *OffloadRequest,
 		// return nil, offload.NewErrUnprocessable(fmt.Errorf("init backend: %w", err))
 	}
 	breq := Request{
-		Method:      OpOffload,
-		Backend:     req.Backend,
-		Class:       req.Class,
-		Tenant:      req.Tenant,
-		Compression: req.Compression,
-		ID:          req.ID(),
+		Method:  OpOffload,
+		Backend: req.Backend,
+		Class:   req.Class,
+		Tenant:  req.Tenant,
+		ID:      req.ID(),
 	}
 	if err := s.offloader.Offload(ctx, store, &breq, callback); err != nil {
 		return offload.NewErrUnprocessable(err)
@@ -196,12 +194,11 @@ func (s *Scheduler) Onload(ctx context.Context, pr *models.Principal,
 	}
 
 	rReq := Request{
-		Method:      OpLoad,
-		ID:          req.ID(),
-		Backend:     req.Backend,
-		Compression: req.Compression,
-		Class:       req.Class,
-		Tenant:      req.Tenant,
+		Method:  OpLoad,
+		ID:      req.ID(),
+		Backend: req.Backend,
+		Class:   req.Class,
+		Tenant:  req.Tenant,
 	}
 	err = s.onloader.Load(ctx, store, &rReq, meta, func(status offload.Status) {})
 	if err != nil {
@@ -247,12 +244,11 @@ func (s *Scheduler) OnloadSimple(ctx context.Context, req *OffloadRequest,
 	// }
 
 	rReq := Request{
-		Method:      OpLoad,
-		ID:          req.ID(),
-		Backend:     req.Backend,
-		Compression: req.Compression,
-		Class:       req.Class,
-		Tenant:      req.Tenant,
+		Method:  OpLoad,
+		ID:      req.ID(),
+		Backend: req.Backend,
+		Class:   req.Class,
+		Tenant:  req.Tenant,
 	}
 	err = s.onloader.Load(ctx, store, &rReq, meta, callback)
 	if err != nil {

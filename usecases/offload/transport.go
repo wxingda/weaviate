@@ -48,9 +48,6 @@ type Request struct {
 
 	// Duration
 	Duration time.Duration
-
-	// Compression is the compression configuration.
-	Compression
 }
 
 type CanCommitResponse struct {
