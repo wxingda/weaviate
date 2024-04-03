@@ -102,3 +102,36 @@ func (db *DB) ReleaseOffload(ctx context.Context, class, tenant string, successf
 	}
 	return
 }
+
+// Returns the list of nodes where shards of class are contained.
+func (db *DB) TenantNodes(ctx context.Context, class string, tenant string) ([]string, error) {
+	unique := make(map[string]struct{})
+
+	tenantFound := false
+	if ss := db.schemaGetter.CopyShardingState(class); ss != nil {
+		for _, shard := range ss.Physical {
+			if tenant == shard.Name {
+				for _, node := range shard.BelongsToNodes {
+					unique[node] = struct{}{}
+				}
+				tenantFound = true
+			}
+		}
+	}
+
+	if !tenantFound {
+		return nil, fmt.Errorf("tenant %q not found", tenant)
+	}
+	if len(unique) == 0 {
+		return nil, fmt.Errorf("tenant %q has 0 nodes", tenant)
+	}
+
+	nodes := make([]string, len(unique))
+	counter := 0
+	for node := range unique {
+		nodes[counter] = node
+		counter++
+	}
+
+	return nodes, nil
+}

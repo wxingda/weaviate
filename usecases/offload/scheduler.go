@@ -99,23 +99,24 @@ func (s *Scheduler) Offload(ctx context.Context, pr *models.Principal, req *Offl
 		Compression: req.Compression,
 		ID:          req.ID(),
 	}
-	if err := s.offloader.Offload(ctx, store, &breq, func(_ *offload.OffloadDistributedDescriptor) {}); err != nil {
+	if err := s.offloader.Offload(ctx, store, &breq, func(_ offload.Status) {}); err != nil {
 		return nil, offload.NewErrUnprocessable(err)
 	} else {
-		st := s.offloader.lastOp.get()
-		status := string(st.Status)
-		return &models.OffloadResponse{
-			Class:   req.Class,
-			Tenant:  req.Tenant,
-			Backend: req.Backend,
-			Status:  &status,
-			Path:    st.Path,
-		}, nil
+		return nil, nil
+		// st := s.offloader.lastOp.get()
+		// status := string(st.Status)
+		// return &models.OffloadResponse{
+		// 	Class:   req.Class,
+		// 	Tenant:  req.Tenant,
+		// 	Backend: req.Backend,
+		// 	Status:  &status,
+		// 	Path:    st.Path,
+		// }, nil
 	}
 }
 
 func (s *Scheduler) OffloadSimple(ctx context.Context, req *OffloadRequest,
-	callback func(desc *offload.OffloadDistributedDescriptor),
+	callback func(status offload.Status),
 ) error {
 	// defer func(begin time.Time) {
 	// 	logOperation(s.logger, "try_backup", req.ID, req.Backend, begin, err)

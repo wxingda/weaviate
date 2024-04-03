@@ -189,45 +189,6 @@ func (db *DB) Shards(ctx context.Context, class string) ([]string, error) {
 	return nodes, nil
 }
 
-// Returns the list of nodes where shards of class are contained.
-// If there are no shards for the class, returns an empty list
-// If there are shards for the class but no nodes are found, return an error
-func (db *DB) TenantNodes(ctx context.Context, class string, tenant string) ([]string, error) {
-	unique := make(map[string]struct{})
-
-	ss := db.schemaGetter.CopyShardingState(class)
-	if len(ss.Physical) == 0 {
-		return []string{}, nil
-	}
-
-	foundTenant := false
-	for _, shard := range ss.Physical {
-		if tenant == shard.Name {
-			foundTenant = true
-			for _, node := range shard.BelongsToNodes {
-				unique[node] = struct{}{}
-			}
-		}
-	}
-
-	if !foundTenant {
-		return nil, fmt.Errorf("tenant %q not found", tenant)
-	}
-	if len(unique) == 0 {
-		return nil, fmt.Errorf("found tenant %q, but has 0 nodes", tenant)
-	}
-
-	nodes := make([]string, len(unique))
-	counter := 0
-
-	for node := range unique {
-		nodes[counter] = node
-		counter++
-	}
-
-	return nodes, nil
-}
-
 func (db *DB) ListClasses(ctx context.Context) []string {
 	classes := db.schemaGetter.GetSchemaSkipAuth().Objects.Classes
 	classNames := make([]string, len(classes))

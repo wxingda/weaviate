@@ -288,9 +288,9 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 
 			// TODO AL change callback to run in worker?
 			err := s.offloadScheduler.OffloadSimple(ctx, req,
-				func(desc *eoff.OffloadDistributedDescriptor) {
-					fmt.Printf("  ==> offload status %q\n", desc.Status)
-					if desc.Status == eoff.Success {
+				func(status eoff.Status) {
+					fmt.Printf("  ==> offload status %q\n", status)
+					if status == eoff.Success {
 						if err := s.manager.UpdateTenantsValidated(context.Background(), params.ClassName,
 							[]*schemaUC.TenantStatusTransition{{
 								Name: o.Name,
