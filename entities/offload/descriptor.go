@@ -18,8 +18,8 @@ import (
 
 // NodeDescriptor contains data related to one participant in DBRO
 type NodeDescriptor struct {
-	Class  string `json:"class"`
-	Tenant string `json:"tenant"`
+	// Class  string `json:"class"`
+	// Tenant string `json:"tenant"`
 	Status Status `json:"status"`
 	Error  string `json:"error"`
 }
@@ -27,13 +27,16 @@ type NodeDescriptor struct {
 type OffloadDistributedDescriptor struct {
 	StartedAt     time.Time                  `json:"startedAt"`
 	CompletedAt   time.Time                  `json:"completedAt"`
-	ID            string                     `json:"id"` // User created backup id
+	ID            string                     `json:"id"`
 	Nodes         map[string]*NodeDescriptor `json:"nodes"`
 	NodeMapping   map[string]string          `json:"node_mapping"`
-	Status        Status                     `json:"status"`  //
-	Version       string                     `json:"version"` //
+	Status        Status                     `json:"status"`
+	Version       string                     `json:"version"`
 	ServerVersion string                     `json:"serverVersion"`
 	Error         string                     `json:"error"`
+
+	Class  string `json:"class"`
+	Tenant string `json:"tenant"`
 }
 
 // // DistributedBAckupDescriptor contains everything need to completely restore a distributed backup
