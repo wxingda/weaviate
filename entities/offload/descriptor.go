@@ -265,19 +265,17 @@ type ShardDescriptor struct {
 // }
 
 type OffloadNodeDescriptor struct {
-	StartedAt   time.Time `json:"startedAt"`
-	CompletedAt time.Time `json:"completedAt"`
-	ID          string    `json:"id"` // User created backup id
-	// Shard         ShardDescriptor `json:"shard"`
-	Status        string `json:"status"`  // "STARTED|TRANSFERRING|TRANSFERRED|SUCCESS|FAILED"
-	Version       string `json:"version"` //
-	ServerVersion string `json:"serverVersion"`
-	Error         string `json:"error"`
-
-	Tenant string   `json:"tenant"`
-	Class  string   `json:"class"`
-	Node   string   `json:"node"`
-	Files  []string `json:"files,omitempty"`
+	ID            string    `json:"id"` // User created backup id
+	Class         string    `json:"class"`
+	Tenant        string    `json:"tenant"`
+	Node          string    `json:"node"`
+	Files         []string  `json:"files,omitempty"`
+	StartedAt     time.Time `json:"startedAt"`
+	CompletedAt   time.Time `json:"completedAt"`
+	Status        string    `json:"status"`  // "STARTED|TRANSFERRING|TRANSFERRED|SUCCESS|FAILED"
+	Version       string    `json:"version"` //
+	ServerVersion string    `json:"serverVersion"`
+	Error         string    `json:"error"`
 }
 
 // BackupDescriptor contains everything needed to completely restore a list of classes
