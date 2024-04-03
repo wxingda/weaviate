@@ -106,7 +106,7 @@ func (r *restorer) restore(ctx context.Context,
 			return
 		}
 
-		err = r.restoreAll(context.Background(), desc, req.CPUPercentage, store, req.NodeMapping)
+		err = r.restoreAll(context.Background(), desc, store, req.NodeMapping)
 		logFields := logrus.Fields{"action": "restore", "backup_id": req.ID}
 		if err != nil {
 			r.logger.WithFields(logFields).Error(err)
@@ -120,11 +120,11 @@ func (r *restorer) restore(ctx context.Context,
 }
 
 func (r *restorer) restoreAll(ctx context.Context,
-	desc *offload.OffloadNodeDescriptor, cpuPercentage int,
+	desc *offload.OffloadNodeDescriptor,
 	store nodeStore, nodeMapping map[string]string,
 ) (err error) {
 	r.lastOp.set(offload.Transferring)
-	if err := r.restoreOne(ctx, desc, cpuPercentage, store, nodeMapping); err != nil {
+	if err := r.restoreOne(ctx, desc, store, nodeMapping); err != nil {
 		return fmt.Errorf("restore id %s: %w", desc.ID, err)
 	}
 	r.logger.WithField("action", "restore").
@@ -143,7 +143,7 @@ func getType(myvar interface{}) string {
 
 func (r *restorer) restoreOne(ctx context.Context,
 	desc *offload.OffloadNodeDescriptor,
-	cpuPercentage int, store nodeStore, nodeMapping map[string]string,
+	store nodeStore, nodeMapping map[string]string,
 ) (err error) {
 	// classLabel := desc.Name
 	// if monitoring.GetMetrics().Group {
@@ -159,8 +159,7 @@ func (r *restorer) restoreOne(ctx context.Context,
 	// if r.sourcer.ClassExists(desc.Name) {
 	// 	return fmt.Errorf("already exists")
 	// }
-	fw := newFileWriter(r.sourcer, store, r.logger).
-		WithPoolPercentage(cpuPercentage)
+	fw := newFileWriter(r.sourcer, store, r.logger)
 
 	rollback, err := fw.Write(ctx, desc)
 	_ = rollback
