@@ -529,11 +529,8 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		appState.Logger, appState.Modules)
 
 	offloadScheduler := offload.NewScheduler(
-		appState.Authorizer,
 		clients.NewClusterOffloads(appState.ClusterHttpClient),
-		appState.DB, appState.Modules,
-		appState.Cluster,
-		appState.Logger)
+		appState.DB, appState.Modules, appState.Cluster, appState.Logger)
 
 	setupSchemaHandlers(api, appState.SchemaManager, offloadScheduler, appState.Metrics, appState.Logger)
 	objectsManager := objects.NewManager(appState.Locks,
@@ -556,8 +553,6 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		appState.SchemaManager,
 		appState.Logger)
 	setupBackupHandlers(api, backupScheduler, appState.Metrics, appState.Logger)
-	// TODO AL temporary, to be removed
-	setupOffloadHandlers(api, offloadScheduler, appState.Metrics, appState.Logger)
 	setupNodesHandlers(api, appState.SchemaManager, appState.DB, appState)
 
 	grpcServer := createGrpcServer(appState)

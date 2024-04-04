@@ -272,23 +272,16 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 	}
 
 	if len(offloads) > 0 {
-		compression := offload.Compression{
-			Level:         offload.DefaultCompression,
-			CPUPercentage: offload.DefaultCPUPercentage,
-			ChunkSize:     offload.DefaultChunkSize,
-		}
-
 		for _, o := range offloads {
 			o := o
 			req := &offload.OffloadRequest{
-				Class:       params.ClassName,
-				Tenant:      o.Name,
-				Backend:     "filesystem", // TODO AL make configurable, move to offloader?
-				Compression: compression,  // TODO AL remove? move to offloader?
+				Class:   params.ClassName,
+				Tenant:  o.Name,
+				Backend: "filesystem", // TODO AL make configurable, move to offloader?
 			}
 
 			// TODO AL change callback to run in worker?
-			err := s.offloadScheduler.OffloadSimple(ctx, req,
+			err := s.offloadScheduler.Offload(ctx, req,
 				func(status eoff.Status) {
 					fmt.Printf("  ==> offload status %q\n", status)
 					if status == eoff.Success {
@@ -323,22 +316,16 @@ func (s *schemaHandlers) updateTenants(params schema.TenantsUpdateParams,
 	}
 
 	if len(loads) > 0 {
-		compression := offload.Compression{
-			Level:         offload.DefaultCompression,
-			CPUPercentage: offload.DefaultCPUPercentage,
-			ChunkSize:     offload.DefaultChunkSize,
-		}
 		for _, l := range loads {
 			l := l
 			req := &offload.OffloadRequest{
-				Class:       params.ClassName,
-				Tenant:      l.Name,
-				Backend:     "filesystem", // TODO AL make configurable, move to offloader?
-				Compression: compression,  // TODO AL remove? move to offloader?
+				Class:   params.ClassName,
+				Tenant:  l.Name,
+				Backend: "filesystem", // TODO AL make configurable, move to offloader?
 			}
 
 			// TODO AL change callback to run in worker?
-			err := s.offloadScheduler.OnloadSimple(ctx, req,
+			err := s.offloadScheduler.Load(ctx, req,
 				func(status eoff.Status) {
 					fmt.Printf("  ==> load status %q\n", status)
 					if status == eoff.Success {

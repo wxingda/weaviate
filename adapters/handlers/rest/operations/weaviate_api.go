@@ -39,7 +39,6 @@ import (
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/meta"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/nodes"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/objects"
-	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/offloads"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/schema"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/well_known"
 	"github.com/weaviate/weaviate/entities/models"
@@ -172,12 +171,6 @@ func NewWeaviateAPI(spec *loads.Document) *WeaviateAPI {
 		}),
 		ObjectsObjectsValidateHandler: objects.ObjectsValidateHandlerFunc(func(params objects.ObjectsValidateParams, principal *models.Principal) middleware.Responder {
 			return middleware.NotImplemented("operation objects.ObjectsValidate has not yet been implemented")
-		}),
-		OffloadsOffloadHandler: offloads.OffloadHandlerFunc(func(params offloads.OffloadParams, principal *models.Principal) middleware.Responder {
-			return middleware.NotImplemented("operation offloads.Offload has not yet been implemented")
-		}),
-		OffloadsOnloadHandler: offloads.OnloadHandlerFunc(func(params offloads.OnloadParams, principal *models.Principal) middleware.Responder {
-			return middleware.NotImplemented("operation offloads.Onload has not yet been implemented")
 		}),
 		SchemaSchemaClusterStatusHandler: schema.SchemaClusterStatusHandlerFunc(func(params schema.SchemaClusterStatusParams, principal *models.Principal) middleware.Responder {
 			return middleware.NotImplemented("operation schema.SchemaClusterStatus has not yet been implemented")
@@ -352,10 +345,6 @@ type WeaviateAPI struct {
 	ObjectsObjectsUpdateHandler objects.ObjectsUpdateHandler
 	// ObjectsObjectsValidateHandler sets the operation handler for the objects validate operation
 	ObjectsObjectsValidateHandler objects.ObjectsValidateHandler
-	// OffloadsOffloadHandler sets the operation handler for the offload operation
-	OffloadsOffloadHandler offloads.OffloadHandler
-	// OffloadsOnloadHandler sets the operation handler for the onload operation
-	OffloadsOnloadHandler offloads.OnloadHandler
 	// SchemaSchemaClusterStatusHandler sets the operation handler for the schema cluster status operation
 	SchemaSchemaClusterStatusHandler schema.SchemaClusterStatusHandler
 	// SchemaSchemaDumpHandler sets the operation handler for the schema dump operation
@@ -578,12 +567,6 @@ func (o *WeaviateAPI) Validate() error {
 	}
 	if o.ObjectsObjectsValidateHandler == nil {
 		unregistered = append(unregistered, "objects.ObjectsValidateHandler")
-	}
-	if o.OffloadsOffloadHandler == nil {
-		unregistered = append(unregistered, "offloads.OffloadHandler")
-	}
-	if o.OffloadsOnloadHandler == nil {
-		unregistered = append(unregistered, "offloads.OnloadHandler")
 	}
 	if o.SchemaSchemaClusterStatusHandler == nil {
 		unregistered = append(unregistered, "schema.SchemaClusterStatusHandler")
@@ -876,14 +859,6 @@ func (o *WeaviateAPI) initHandlerCache() {
 		o.handlers["POST"] = make(map[string]http.Handler)
 	}
 	o.handlers["POST"]["/objects/validate"] = objects.NewObjectsValidate(o.context, o.ObjectsObjectsValidateHandler)
-	if o.handlers["POST"] == nil {
-		o.handlers["POST"] = make(map[string]http.Handler)
-	}
-	o.handlers["POST"]["/offloads/{backend}/{class}"] = offloads.NewOffload(o.context, o.OffloadsOffloadHandler)
-	if o.handlers["POST"] == nil {
-		o.handlers["POST"] = make(map[string]http.Handler)
-	}
-	o.handlers["POST"]["/offloads/{backend}/{class}/onload"] = offloads.NewOnload(o.context, o.OffloadsOnloadHandler)
 	if o.handlers["GET"] == nil {
 		o.handlers["GET"] = make(map[string]http.Handler)
 	}

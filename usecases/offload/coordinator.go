@@ -72,10 +72,10 @@ type offloadCoordinator struct {
 
 // newcoordinator creates an instance which coordinates distributed BRO operations among many shards.
 func newOffloadCoordinator(
-	selector selector,
 	client client,
 	log logrus.FieldLogger,
 	nodeResolver nodeResolver,
+	selector selector,
 ) *offloadCoordinator {
 	c := &offloadCoordinator{
 		selector: selector,
@@ -155,7 +155,7 @@ func (c *offloadCoordinator) handleJob(j job) {
 			return err
 		}
 
-		if err := j.store.PutMeta(j.ctx, OffloadFile, j.descriptor); err != nil {
+		if err := j.store.PutMeta(j.ctx, OffloadMetaFile, j.descriptor); err != nil {
 			c.ops.reset(j.req.ID)
 			return fmt.Errorf("cannot init meta file: %w", err)
 		}
@@ -177,7 +177,7 @@ func (c *offloadCoordinator) handleJob(j job) {
 				"class":      j.req.Class,
 				"tenant":     j.req.Tenant,
 			}
-			if err := j.store.PutMeta(ctx, OffloadFile, j.descriptor); err != nil {
+			if err := j.store.PutMeta(ctx, OffloadMetaFile, j.descriptor); err != nil {
 				c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
 			}
 			if j.descriptor.Status == offload.Success {
@@ -252,7 +252,7 @@ func (c *coordinator) handleJob(j job) {
 		}
 
 		// initial put so restore status is immediately available
-		if err := j.store.PutMeta(j.ctx, LoadFile, j.descriptor); err != nil {
+		if err := j.store.PutMeta(j.ctx, LoadMetaFile, j.descriptor); err != nil {
 			c.ops.reset(j.req.ID)
 			req := &AbortRequest{Method: OpLoad, ID: j.req.ID, Backend: j.req.Backend}
 			c.abortAll(j.ctx, req, nodes)
@@ -271,7 +271,7 @@ func (c *coordinator) handleJob(j job) {
 				"class":   j.req.Class,
 				"tenant":  j.req.Tenant,
 			}
-			if err := j.store.PutMeta(ctx, LoadFile, j.descriptor); err != nil {
+			if err := j.store.PutMeta(ctx, LoadMetaFile, j.descriptor); err != nil {
 				c.log.WithFields(logFields).Errorf("coordinator: put_meta: %v", err)
 			}
 			if j.descriptor.Status == offload.Success {
