@@ -53,12 +53,10 @@ const (
 )
 
 const (
-	// OffloadNodeFile used by a node to store its metadata
-	OffloadNodeFile = "offload_node.json"
-	// GlobalBackupFile used by coordinator to store its metadata
-	OffloadFile    = "offload_config.json"
-	LoadFile       = "load_config.json"
-	_TempDirectory = ".load.tmp"
+	OffloadNodeMetaFile = "offload_node_meta.json"
+	OffloadMetaFile     = "offload_meta.json"
+	LoadMetaFile        = "load_meta.json"
+	_TempDirectory      = ".load.tmp"
 )
 
 var _NUMCPU = runtime.NumCPU()
@@ -128,7 +126,7 @@ type nodeStore struct {
 // adjustBasePath: sets the base path to the old path if the backup has been created prior to v1.17.
 func (s *nodeStore) Meta(ctx context.Context) (*offload.OffloadNodeDescriptor, error) {
 	var result offload.OffloadNodeDescriptor
-	err := s.meta(ctx, OffloadNodeFile, &result)
+	err := s.meta(ctx, OffloadNodeMetaFile, &result)
 	// if err != nil {
 	// 	cs := &objStore{s.b, backupID} // for backward compatibility
 	// 	if err := cs.meta(ctx, OffloadFile, &result); err == nil {
@@ -144,7 +142,7 @@ func (s *nodeStore) Meta(ctx context.Context) (*offload.OffloadNodeDescriptor, e
 
 // meta marshals and uploads metadata
 func (s *nodeStore) PutMeta(ctx context.Context, desc *offload.OffloadNodeDescriptor) error {
-	return s.putMeta(ctx, OffloadNodeFile, desc)
+	return s.putMeta(ctx, OffloadNodeMetaFile, desc)
 }
 
 type coordStore struct {

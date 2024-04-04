@@ -26,11 +26,6 @@ import (
 // Version of backup structure
 const Version = "1.0"
 
-// TODO error handling need to be implemented properly.
-// Current error handling is not idiomatic and relays on string comparisons which makes testing very brittle.
-
-// var regExpID = regexp.MustCompile("^[a-z0-9_-]+$")
-
 type OffloadBackendProvider interface {
 	BackupBackend(backend string) (modulecapabilities.BackupBackend, error)
 }
@@ -109,16 +104,11 @@ type Compression struct {
 
 // OffloadRequest a transition request from API to Backend.
 type OffloadRequest struct {
-	// Compression is the compression configuration.
-	Compression
-
 	// Backend specify on which backend to store backups (gcs, s3, ..)
 	Backend string
 
 	Class string
 
-	// Include is list of class which need to be backed up
-	// The same class cannot appear in both Include and Exclude in the same request
 	Tenant string
 
 	// NodeMapping is a map of node name replacement where key is the old name and value is the new name
@@ -262,27 +252,4 @@ func nodeBackend(node string, provider OffloadBackendProvider, backend, id strin
 // basePath of the backup
 func basePath(backendType, backupID string) string {
 	return fmt.Sprintf("%s/%s", backendType, backupID)
-}
-
-func filterClasses(classes, excludes []string) []string {
-	if len(excludes) == 0 {
-		return classes
-	}
-	m := make(map[string]struct{}, len(classes))
-	for _, c := range classes {
-		m[c] = struct{}{}
-	}
-	for _, x := range excludes {
-		delete(m, x)
-	}
-	if len(classes) != len(m) {
-		classes = classes[:len(m)]
-		i := 0
-		for k := range m {
-			classes[i] = k
-			i++
-		}
-	}
-
-	return classes
 }

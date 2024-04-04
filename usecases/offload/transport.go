@@ -39,12 +39,11 @@ type Request struct {
 	// NodeMapping specify node names replacement to be made on restore
 	NodeMapping map[string]string
 
-	// Classes is list of class which need to be backed up
+	ID string
+
 	Class string
 
 	Tenant string
-
-	ID string
 
 	// Duration
 	Duration time.Duration
