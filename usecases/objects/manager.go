@@ -60,6 +60,7 @@ type schemaManager interface {
 
 	// GetConsistentSchema retrieves a locally cached copy of the schema
 	GetConsistentSchema(principal *models.Principal, consistency bool) (schema.Schema, error)
+	ConsistentMultiTenancy(ctx context.Context, principal *models.Principal, name string) (schema.ClassInfo, error)
 }
 
 // Manager manages kind changes at a use-case level, i.e. agnostic of

@@ -255,6 +255,17 @@ func (h *Handler) getTenants(class string) ([]*models.Tenant, error) {
 	return ts, h.metaReader.Read(class, f)
 }
 
+func (h *Handler) ConsistentMultiTenancy(ctx context.Context, principal *models.Principal, name string) (schema.ClassInfo, error) {
+	info, err := h.multiTenancy(name)
+	return schema.ClassInfo{
+		Exists:            info.Exists,
+		MultiTenancy:      info.MultiTenancy,
+		ReplicationFactor: info.ReplicationFactor,
+		Tenants:           info.Tenants,
+		Properties:        info.Properties,
+	}, err
+}
+
 func (h *Handler) multiTenancy(class string) (store.ClassInfo, error) {
 	info := store.ClassInfo{}
 	cls, err := h.metaWriter.QueryReadOnlyClass(class)

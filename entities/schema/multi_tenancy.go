@@ -13,6 +13,14 @@ package schema
 
 import "github.com/weaviate/weaviate/entities/models"
 
+type ClassInfo struct {
+	Exists            bool
+	MultiTenancy      models.MultiTenancyConfig
+	ReplicationFactor int
+	Tenants           int
+	Properties        int
+}
+
 func MultiTenancyEnabled(class *models.Class) bool {
 	if class.MultiTenancyConfig != nil {
 		return class.MultiTenancyConfig.Enabled
