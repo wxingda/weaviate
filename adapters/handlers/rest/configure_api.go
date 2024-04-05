@@ -316,7 +316,7 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 	appState.BackupManager = backupManager
 
 	offloadManager := offload.NewHandler(appState.Logger, appState.Authorizer,
-		schemaManager, repo, appState.Modules)
+		appState.Cluster, repo, appState.Modules)
 	appState.OffloadManager = offloadManager
 
 	go clusterapi.Serve(appState)

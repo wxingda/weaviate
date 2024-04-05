@@ -31,7 +31,6 @@ type restorer struct {
 	logger   logrus.FieldLogger
 	sourcer  Sourcer
 	backends OffloadBackendProvider
-	schema   schemaManger
 	shardSyncChan
 
 	// TODO: keeping status in memory after restore has been done
@@ -44,14 +43,12 @@ type restorer struct {
 func newRestorer(node string, logger logrus.FieldLogger,
 	sourcer Sourcer,
 	backends OffloadBackendProvider,
-	schema schemaManger,
 ) *restorer {
 	return &restorer{
 		node:          node,
 		logger:        logger,
 		sourcer:       sourcer,
 		backends:      backends,
-		schema:        schema,
 		shardSyncChan: shardSyncChan{coordChan: make(chan interface{}, 5)},
 	}
 }

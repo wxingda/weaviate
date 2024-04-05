@@ -26,7 +26,7 @@ var errLocalBackend = errors.New("local filesystem backend is not viable for off
 
 const errMsgHigherVersion = "unable to load teant as it was produced by a higher version"
 
-// Scheduler assigns backup operations to coordinators.
+// Scheduler assigns offload operations to coordinators.
 type Scheduler struct {
 	// deps
 	logger    logrus.FieldLogger
@@ -137,6 +137,8 @@ func (s *Scheduler) validateOffloadRequest(ctx context.Context, store coordStore
 	// 	return nil, errLocalBackend
 	// }
 
+	// TODO AL check whether class/tenant exist?
+
 	destPath := store.HomeDir()
 	// TODO AL remove files first?
 	// there is no offload with given id on the backend, regardless of its state (valid or corrupted)
@@ -156,6 +158,8 @@ func (s *Scheduler) validateLoadRequest(ctx context.Context, store coordStore, r
 	// if !store.b.IsExternal() && s.loader.nodeResolver.NodeCount() > 1 {
 	// 	return nil, errLocalBackend
 	// }
+
+	// TODO AL check whether class/tenant exist?
 
 	destPath := store.HomeDir()
 	meta, err := store.Meta(ctx, OffloadMetaFile)

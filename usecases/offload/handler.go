@@ -17,13 +17,12 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/modulecapabilities"
 	"github.com/weaviate/weaviate/entities/offload"
 )
 
-// Version of backup structure
+// Version of offload structure
 const Version = "1.0"
 
 type OffloadBackendProvider interface {
@@ -34,14 +33,10 @@ type authorizer interface {
 	Authorize(principal *models.Principal, verb, resource string) error
 }
 
-type schemaManger interface {
-	RestoreClass(ctx context.Context, d *backup.ClassDescriptor, nodeMapping map[string]string) error
-	NodeName() string
-}
-
 type nodeResolver interface {
 	NodeHostname(nodeName string) (string, bool)
 	NodeCount() int
+	LocalName() string
 }
 
 type Status struct {
@@ -65,24 +60,18 @@ type Handler struct {
 func NewHandler(
 	logger logrus.FieldLogger,
 	authorizer authorizer,
-	schema schemaManger,
+	nodeResolver nodeResolver,
 	sourcer Sourcer,
 	backends OffloadBackendProvider,
 ) *Handler {
-	node := schema.NodeName()
+	node := nodeResolver.LocalName()
 	m := &Handler{
 		node:       node,
 		logger:     logger,
 		authorizer: authorizer,
 		backends:   backends,
-		backupper: newBackupper(node, logger,
-			sourcer,
-			backends),
-		restorer: newRestorer(node, logger,
-			sourcer,
-			backends,
-			schema,
-		),
+		backupper:  newBackupper(node, logger, sourcer, backends),
+		restorer:   newRestorer(node, logger, sourcer, backends),
 	}
 	return m
 }
@@ -121,13 +110,14 @@ func (r *OffloadRequest) ID() string {
 }
 
 // OnCanCommit will be triggered when coordinator asks the node to participate
-// in a distributed backup operation
+// in a distributed offload operation
 func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitResponse {
-	ret := &CanCommitResponse{Method: req.Method, ID: req.ID}
+	resp := &CanCommitResponse{Method: req.Method, ID: req.ID}
 
 	nodeName := m.node
-	// If we are doing a restore and have a nodeMapping specified, ensure we use the "old" node name from the backup to retrieve/store the
-	// backup information.
+	// If we are doing a load and have a nodeMapping specified,
+	// ensure we use the "old" node name from the offload to retrieve/store the
+	// offload information.
 	if req.Method == OpLoad {
 		for oldNodeName, newNodeName := range req.NodeMapping {
 			if nodeName == newNodeName {
@@ -138,44 +128,42 @@ func (m *Handler) OnCanCommit(ctx context.Context, req *Request) *CanCommitRespo
 	}
 	store, err := nodeBackend(nodeName, m.backends, req.Backend, req.ID)
 	if err != nil {
-		ret.Err = fmt.Sprintf("no backup backend %q, did you enable the right module?", req.Backend)
-		return ret
+		resp.Err = fmt.Sprintf("no offload backend %q", req.Backend)
+		return resp
 	}
 
 	switch req.Method {
 	case OpOffload:
-		// if err := m.backupper.sourcer.Backupable(ctx, req.Classes); err != nil {
-		// 	ret.Err = err.Error()
-		// 	return ret
-		// }
+		// TODO AL check whether class/tenant exist?
+		// TODO AL do not initialize on every request?
 		if err = store.Initialize(ctx); err != nil {
-			ret.Err = fmt.Sprintf("init uploader: %v", err)
-			return ret
+			resp.Err = fmt.Sprintf("init backend: %v", err)
+			return resp
 		}
 		res, err := m.backupper.backup(ctx, store, req)
 		if err != nil {
-			ret.Err = err.Error()
-			return ret
+			resp.Err = err.Error()
+			return resp
 		}
-		ret.Timeout = res.Timeout
+		resp.Timeout = res.Timeout
 	case OpLoad:
 		meta, err := m.restorer.validate(ctx, &store, req)
 		if err != nil {
-			ret.Err = err.Error()
-			return ret
+			resp.Err = err.Error()
+			return resp
 		}
 		res, err := m.restorer.restore(ctx, req, meta, store)
 		if err != nil {
-			ret.Err = err.Error()
-			return ret
+			resp.Err = err.Error()
+			return resp
 		}
-		ret.Timeout = res.Timeout
+		resp.Timeout = res.Timeout
 	default:
-		ret.Err = fmt.Sprintf("unknown backup operation: %s", req.Method)
-		return ret
+		resp.Err = fmt.Sprintf("unknown backup operation: %s", req.Method)
+		return resp
 	}
 
-	return ret
+	return resp
 }
 
 // OnCommit will be triggered when the coordinator confirms the execution of a previous operation
