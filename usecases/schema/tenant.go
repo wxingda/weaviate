@@ -256,10 +256,25 @@ func (h *Handler) getTenants(class string) ([]*models.Tenant, error) {
 }
 
 func (h *Handler) multiTenancy(class string) (store.ClassInfo, error) {
-	info := h.metaReader.ClassInfo(class)
-	if !info.Exists {
+	info := store.ClassInfo{}
+	cls, err := h.metaWriter.QueryReadOnlyClass(class)
+	if err != nil {
+		return info, err
+	}
+	if cls == nil {
 		return info, fmt.Errorf("class %q: %w", class, ErrNotFound)
 	}
+	info = store.ClassInfo{
+		Exists:            true,
+		MultiTenancy:      *cls.MultiTenancyConfig,
+		ReplicationFactor: int(cls.ReplicationConfig.Factor),
+		Properties:        len(cls.Properties),
+	}
+
+	if cls.ShardingConfig != nil && schema.MultiTenancyEnabled(cls) {
+		info.Tenants = schema.ShardingConfigFromModel(cls.ShardingConfig).DesiredCount
+	}
+
 	if !info.MultiTenancy.Enabled {
 		return info, fmt.Errorf("multi-tenancy is not enabled for class %q", class)
 	}
