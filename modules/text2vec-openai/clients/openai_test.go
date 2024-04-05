@@ -103,11 +103,33 @@ func TestClient(t *testing.T) {
 
 		expected := &modulecomponents.VectorizationResult{
 			Text:       []string{"This is my text"},
-			Vector:     [][]float32{{0.1, 0.2, 0.3}},
-			Dimensions: 3,
+			Vector:     [][]float32{{0.1, 0.2, 0.3, 0}},
+			Dimensions: 4,
 			Errors:     []error{nil},
 		}
 		res, _, err := c.Vectorize(context.Background(), []string{"This is my text"}, fakeClassConfig{classConfig: map[string]interface{}{"Type": "text", "Model": "ada"}})
+
+		assert.Nil(t, err)
+		assert.Equal(t, expected, res)
+	})
+
+	t.Run("when all is fine with multiple requests", func(t *testing.T) {
+		server := httptest.NewServer(&fakeHandler{t: t})
+		defer server.Close()
+
+		c := New("apiKey", "", "", 0, nullLogger())
+		c.buildUrlFn = func(baseURL, resourceName, deploymentID string, isAzure bool) (string, error) {
+			return server.URL, nil
+		}
+
+		texts := []string{"This is my text", "This is another text", "Three texts are the best"}
+		expected := &modulecomponents.VectorizationResult{
+			Text:       texts,
+			Vector:     [][]float32{{0.1, 0.2, 0.3, 0}, {0.1, 0.2, 0.3, 1}, {0.1, 0.2, 0.3, 2}},
+			Dimensions: 4,
+			Errors:     []error{nil, nil, nil},
+		}
+		res, _, err := c.Vectorize(context.Background(), texts, fakeClassConfig{classConfig: map[string]interface{}{"Type": "text", "Model": "ada"}})
 
 		assert.Nil(t, err)
 		assert.Equal(t, expected, res)
@@ -161,8 +183,8 @@ func TestClient(t *testing.T) {
 
 		expected := &modulecomponents.VectorizationResult{
 			Text:       []string{"This is my text"},
-			Vector:     [][]float32{{0.1, 0.2, 0.3}},
-			Dimensions: 3,
+			Vector:     [][]float32{{0.1, 0.2, 0.3, 0}},
+			Dimensions: 4,
 			Errors:     []error{nil},
 		}
 		res, _, err := c.Vectorize(ctxWithValue, []string{"This is my text"},
@@ -295,14 +317,24 @@ func (f *fakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	textInput := textInputArray[0].(string)
 	assert.Greater(f.t, len(textInput), 0)
 
-	embeddingData := map[string]interface{}{
-		"object":    textInput,
-		"index":     0,
-		"embedding": []float32{0.1, 0.2, 0.3},
+	data := make([]interface{}, len(textInputArray))
+	for i, text := range textInputArray {
+		data[i] = map[string]interface{}{
+			"object":    text,
+			"index":     i,
+			"embedding": []float32{0.1, 0.2, 0.3, float32(i)},
+		}
 	}
+
+	// switch order of the data array to test if the order is preserved - this can happen with the real openAI api.
+	// The client should return the vectors in the correct order using the index field.
+	for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
+		data[i], data[j] = data[j], data[i]
+	}
+
 	embedding := map[string]interface{}{
 		"object": "list",
-		"data":   []interface{}{embeddingData},
+		"data":   data,
 	}
 
 	outBytes, err := json.Marshal(embedding)

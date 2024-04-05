@@ -189,10 +189,11 @@ func (v *client) vectorize(ctx context.Context, input []string, model string, co
 	embeddings := make([][]float32, len(resBody.Data))
 	openAIerror := make([]error, len(resBody.Data))
 	for i := range resBody.Data {
-		texts[i] = resBody.Data[i].Object
-		embeddings[i] = resBody.Data[i].Embedding
+		index := resBody.Data[i].Index
+		texts[index] = resBody.Data[i].Object
+		embeddings[index] = resBody.Data[i].Embedding
 		if resBody.Data[i].Error != nil {
-			openAIerror[i] = v.getError(res.StatusCode, resBody.Data[i].Error, config.IsAzure)
+			openAIerror[index] = v.getError(res.StatusCode, resBody.Data[index].Error, config.IsAzure)
 		}
 	}
 
