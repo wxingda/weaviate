@@ -266,11 +266,13 @@ func (h *Handler) multiTenancy(class string) (store.ClassInfo, error) {
 	}
 	info = store.ClassInfo{
 		Exists:            true,
-		MultiTenancy:      *cls.MultiTenancyConfig,
 		ReplicationFactor: int(cls.ReplicationConfig.Factor),
 		Properties:        len(cls.Properties),
 	}
 
+	if cls.MultiTenancyConfig != nil {
+		info.MultiTenancy = *cls.MultiTenancyConfig
+	}
 	if cls.ShardingConfig != nil && schema.MultiTenancyEnabled(cls) {
 		info.Tenants = schema.ShardingConfigFromModel(cls.ShardingConfig).DesiredCount
 	}

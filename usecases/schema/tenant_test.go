@@ -13,12 +13,12 @@ package schema
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/weaviate/weaviate/cluster/store"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
 )
@@ -72,8 +72,8 @@ func TestAddTenants(t *testing.T) {
 			tenants: tenants,
 			errMsgs: []string{"not enabled"},
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -82,8 +82,8 @@ func TestAddTenants(t *testing.T) {
 			tenants: tenants,
 			errMsgs: []string{"not enabled"},
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -92,7 +92,8 @@ func TestAddTenants(t *testing.T) {
 			tenants: tenants,
 			errMsgs: []string{ErrNotFound.Error()},
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(store.ClassInfo{Exists: false})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(nil, errors.New("not found"))
+				// store.ClassInfo{Exists: false})
 			},
 		},
 		{
@@ -144,8 +145,8 @@ func TestAddTenants(t *testing.T) {
 			},
 			errMsgs: []string{},
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtEnabledClass, nil)
+				//store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}}
 				fakeMetaHandler.On("Read", mock.Anything, mock.Anything).Return(nil)
 				fakeMetaHandler.On("AddTenants", mock.Anything, mock.Anything).Return(nil)
 			},
@@ -231,8 +232,8 @@ func TestUpdateTenants(t *testing.T) {
 			errMsgs:         []string{"not enabled"},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -242,8 +243,8 @@ func TestUpdateTenants(t *testing.T) {
 			errMsgs:         []string{"not enabled"},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -253,7 +254,7 @@ func TestUpdateTenants(t *testing.T) {
 			errMsgs:         []string{ErrNotFound.Error()},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(store.ClassInfo{Exists: false})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(nil, errors.New("not found"))
 			},
 		},
 		{
@@ -320,8 +321,8 @@ func TestUpdateTenants(t *testing.T) {
 				{Name: tenants[1].Name, ActivityStatus: models.TenantActivityStatusCOLD},
 			},
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtEnabledClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}})
 				fakeMetaHandler.On("UpdateTenants", mock.Anything, mock.Anything).Return(nil)
 			},
 		},
@@ -404,8 +405,8 @@ func TestDeleteTenants(t *testing.T) {
 			errMsgs:         []string{"not enabled"},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -415,8 +416,8 @@ func TestDeleteTenants(t *testing.T) {
 			errMsgs:         []string{"not enabled"},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtNilClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{}})
 			},
 		},
 		{
@@ -426,8 +427,7 @@ func TestDeleteTenants(t *testing.T) {
 			errMsgs:         []string{ErrNotFound.Error()},
 			expectedTenants: tenants,
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: false, MultiTenancy: models.MultiTenancyConfig{}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(nil, errors.New("not found"))
 			},
 		},
 		{
@@ -449,8 +449,8 @@ func TestDeleteTenants(t *testing.T) {
 			errMsgs:         []string{},
 			expectedTenants: tenants[2:],
 			mockCalls: func(fakeMetaHandler *fakeMetaHandler) {
-				fakeMetaHandler.On("ClassInfo", mock.Anything).Return(
-					store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}})
+				fakeMetaHandler.On("QueryReadOnlyClass", mock.Anything).Return(mtEnabledClass, nil)
+				// store.ClassInfo{Exists: true, MultiTenancy: models.MultiTenancyConfig{Enabled: true}})
 				fakeMetaHandler.On("DeleteTenants", mock.Anything, mock.Anything).Return(nil)
 			},
 		},
