@@ -31,6 +31,9 @@ const (
 	DefaultDynamicEFFactor        = 8
 	DefaultSkip                   = false
 	DefaultFlatSearchCutoff       = 40000
+	DefaultACORN                  = false
+	DefaultACORNGamma             = 10
+	DefaultACORNMBeta             = DefaultMaxConnections * 2
 
 	// Fail validation if those criteria are not met
 	MinmumMaxConnections = 4
@@ -51,6 +54,9 @@ type UserConfig struct {
 	FlatSearchCutoff       int      `json:"flatSearchCutoff"`
 	Distance               string   `json:"distance"`
 	PQ                     PQConfig `json:"pq"`
+	ACORN                  bool     `json:"acorn"`
+	ACORNGamma             int      `json:"acornGamma"`
+	ACORNMBeta             int      `json:"acornMBeta"`
 }
 
 // IndexType returns the type of the underlying vector index, thus making sure
@@ -87,6 +93,9 @@ func (u *UserConfig) SetDefaults() {
 			Distribution: DefaultPQEncoderDistribution,
 		},
 	}
+	u.ACORN = DefaultACORN
+	u.ACORNGamma = DefaultACORNGamma
+	u.ACORNMBeta = DefaultACORNMBeta
 }
 
 // ParseAndValidateConfig from an unknown input value, as this is not further

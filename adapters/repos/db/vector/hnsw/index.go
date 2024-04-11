@@ -164,6 +164,10 @@ type hnsw struct {
 	VectorForIDThunk       common.VectorForID[float32]
 	shardedNodeLocks       *common.ShardedLocks
 	store                  *lsmkv.Store
+
+	acorn      bool
+	acornGamma int
+	acornMBeta int
 }
 
 type CommitLogger interface {
@@ -251,10 +255,13 @@ func New(cfg Config, uc ent.UserConfig, tombstoneCallbacks, shardCompactionCallb
 		resetCtxCancel:         resetCtxCancel,
 		initialInsertOnce:      &sync.Once{},
 
-		ef:       int64(uc.EF),
-		efMin:    int64(uc.DynamicEFMin),
-		efMax:    int64(uc.DynamicEFMax),
-		efFactor: int64(uc.DynamicEFFactor),
+		ef:         int64(uc.EF),
+		efMin:      int64(uc.DynamicEFMin),
+		efMax:      int64(uc.DynamicEFMax),
+		efFactor:   int64(uc.DynamicEFFactor),
+		acorn:      uc.ACORN,
+		acornGamma: uc.ACORNGamma,
+		acornMBeta: uc.ACORNMBeta,
 
 		metrics:   NewMetrics(cfg.PrometheusMetrics, cfg.ClassName, cfg.ShardName),
 		shardName: cfg.ShardName,

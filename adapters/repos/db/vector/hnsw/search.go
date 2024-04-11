@@ -946,3 +946,289 @@ func (h *hnsw) filteredSearchLayerByVectorWithDistancer(queryVector []float32,
 
 	return results, nil
 }
+
+func (h *hnsw) ACORNSearch(vector []float32, k int, allowList helpers.AllowList) ([]uint64, []float32, error) {
+	h.compressActionLock.RLock()
+	defer h.compressActionLock.RUnlock()
+
+	vector = h.normalizeVec(vector)
+	return h.acornSearch(vector, k, h.searchTimeEF(k), allowList)
+}
+
+func (h *hnsw) acornSearch(searchVec []float32, k int,
+	ef int, allowList helpers.AllowList,
+) ([]uint64, []float32, error) {
+	if h.isEmpty() {
+		return nil, nil, nil
+	}
+
+	if k < 0 {
+		return nil, nil, fmt.Errorf("k must be greater than zero")
+	}
+
+	h.RLock()
+	entryPointID := h.entryPointID
+	maxLayer := h.currentMaximumLayer
+	h.RUnlock()
+
+	entryPointDistance, ok, err := h.distBetweenNodeAndVec(entryPointID, searchVec)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "acorn search: distance between entrypoint and query node")
+	}
+
+	if !ok {
+		return nil, nil, fmt.Errorf("entrypoint was deleted in the object store, " +
+			"it has been flagged for cleanup and should be fixed in the next cleanup cycle")
+	}
+
+	var byteDistancer *ssdhelpers.PQDistancer
+	if h.compressed.Load() {
+		byteDistancer = h.pq.NewDistancer(searchVec)
+		defer h.pq.ReturnDistancer(byteDistancer)
+	}
+	// stop at layer 1, not 0!
+	for level := maxLayer; level >= 1; level-- {
+		eps := priorityqueue.NewMin[any](10)
+		eps.Insert(entryPointID, entryPointDistance)
+
+		// Don't acorn search unti layer 0.
+		//res, err := h.acornSearchLayer(searchVec, eps, 1, level, nil, byteDistancer)
+		res, err := h.searchLayerByVectorWithDistancer(searchVec, eps, 1, level, nil, byteDistancer)
+		if err != nil {
+			return nil, nil, errors.Wrapf(err, "acorn search: search layer at level %d", level)
+		}
+
+		for res.Len() > 0 {
+			cand := res.Pop()
+			n := h.nodeByID(cand.ID)
+			if n == nil {
+				if err := h.addTombstone(cand.ID); err != nil {
+					return nil, nil, err
+				}
+
+				continue
+			}
+
+			if !n.isUnderMaintenance() {
+				entryPointID = cand.ID
+				entryPointDistance = cand.Dist
+				break
+			}
+		}
+
+		h.pools.pqResults.Put(res)
+	}
+
+	eps := priorityqueue.NewMin[any](10)
+	eps.Insert(entryPointID, entryPointDistance)
+	res, err := h.acornSearchLayer(searchVec, eps, ef, 0, allowList, byteDistancer)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "acorn search: search layer at level %d", 0)
+	}
+
+	if h.shouldRescore() {
+		ids := make([]uint64, res.Len())
+		i := len(ids) - 1
+		for res.Len() > 0 {
+			res := res.Pop()
+			ids[i] = res.ID
+			i--
+		}
+		res.Reset()
+		for _, id := range ids {
+			dist, _, _ := h.distanceFromBytesToFloatNode(byteDistancer, id)
+			res.Insert(id, dist)
+			if res.Len() > ef {
+				res.Pop()
+			}
+		}
+
+	}
+
+	for res.Len() > k {
+		res.Pop()
+	}
+
+	ids := make([]uint64, res.Len())
+	dists := make([]float32, res.Len())
+
+	// results is ordered in reverse, we need to flip the order before presenting
+	// to the user!
+	i := len(ids) - 1
+	for res.Len() > 0 {
+		res := res.Pop()
+		ids[i] = res.ID
+		dists[i] = res.Dist
+		i--
+	}
+	h.pools.pqResults.Put(res)
+	return ids, dists, nil
+}
+
+func (h *hnsw) acornSearchLayer(queryVector []float32,
+	entrypoints *priorityqueue.Queue[any], ef int, level int,
+	allowList helpers.AllowList, byteDistancer *ssdhelpers.PQDistancer,
+) (*priorityqueue.Queue[any], error) {
+	h.pools.visitedListsLock.Lock()
+	visited := h.pools.visitedLists.Borrow()
+	h.pools.visitedListsLock.Unlock()
+
+	candidates := h.pools.pqCandidates.GetMin(ef)
+	results := h.pools.pqResults.GetMax(ef)
+	var floatDistancer distancer.Distancer
+	if h.compressed.Load() {
+		byteDistancer = h.pq.NewDistancer(queryVector)
+		defer h.pq.ReturnDistancer(byteDistancer)
+	} else {
+		floatDistancer = h.distancerProvider.New(queryVector)
+	}
+
+	h.insertViableEntrypointsAsCandidatesAndResults(entrypoints, candidates,
+		results, level, visited, allowList)
+
+	var worstResultDistance float32
+	var err error
+	if h.compressed.Load() {
+		if results.Len() > 0 {
+			worstResultDistance, err = h.currentWorstResultDistanceToByte(results, byteDistancer)
+			if err != nil {
+				return nil, errors.Wrapf(err, "calculate distance of current last result")
+			}
+		} else {
+			worstResultDistance = math.MaxFloat32
+		}
+	} else {
+		if results.Len() > 0 {
+			worstResultDistance, err = h.currentWorstResultDistanceToFloat(results, floatDistancer)
+			if err != nil {
+				return nil, errors.Wrapf(err, "calculate distance of current last result")
+			}
+		} else {
+			worstResultDistance = math.MaxFloat32
+		}
+	}
+	if err != nil {
+		return nil, errors.Wrapf(err, "calculate distance of current last result")
+	}
+	connectionsReusable := make([]uint64, h.maximumConnectionsLayerZero*h.acornGamma) // could be this
+
+	for candidates.Len() > 0 || results.Len() < ef {
+		var dist float32
+		candidate := candidates.Pop()
+		dist = candidate.Dist
+
+		if dist > worstResultDistance && results.Len() >= ef {
+			break
+		}
+
+		h.shardedNodeLocks.RLock(candidate.ID)
+		candidateNode := h.nodes[candidate.ID]
+		h.shardedNodeLocks.RUnlock(candidate.ID)
+
+		if candidateNode == nil {
+			continue
+		}
+
+		candidateNode.Lock()
+		if candidateNode.level < level {
+			candidateNode.Unlock()
+			continue
+		}
+
+		neighbors := make([]uint64, 0, len(candidateNode.connections[level]))
+		compressionHeuristic := false
+		if compressionHeuristic {
+			for i, neighborID := range candidateNode.connections[level] {
+				if i < M_beta {
+					if allowList.Contains(neighborID) {
+						neighbors = append(neighbors, neighborID)
+					}
+				} else {
+					for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
+						if allowList.Contains(neighborOfNeighborID) {
+							neighbors = append(neighbors, neighborOfNeighborID)
+						}
+					}
+				}
+			}
+		} else {
+			for _, neighborID := range candidateNode.connections[level] {
+				if allowList.Contains(neighborID) {
+					neighbors = append(neighbors, neighborID)
+				}
+			}
+		}
+		neighbors = neighbors[:min(len(neighbors), M)]
+
+		if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero*h.acornGamma {
+			// it should never call this
+			connectionsReusable = make([]uint64, len(candidateNode.connections[level])*h.acornGamma)
+		} else {
+			connectionsReusable = connectionsReusable[:len(candidateNode.connections[level])]
+		}
+
+		copy(connectionsReusable, candidateNode.connections[level])
+		candidateNode.Unlock()
+
+		for _, neighborID := range connectionsReusable {
+			if ok := visited.Visited(neighborID); ok {
+				continue
+			}
+
+			visited.Visit(neighborID)
+			var distance float32
+			var ok bool
+			var err error
+			if h.compressed.Load() {
+				distance, ok, err = h.distanceToByteNode(byteDistancer, neighborID)
+			} else {
+				distance, ok, err = h.distanceToFloatNode(floatDistancer, neighborID)
+			}
+			if err != nil {
+				return nil, errors.Wrap(err, "calculate distance between candidate and query")
+			}
+
+			if !ok {
+				// node was deleted in the underlying object store
+				continue
+			}
+
+			if distance < worstResultDistance || results.Len() < ef {
+				// These neighbors are already filtered such that they are on the allowList.
+
+				if err != nil {
+					return nil, errors.Wrap(err, "acorn get neighbors")
+				}
+
+				if h.compressed.Load() {
+					if candidates.Len() > 0 {
+						h.compressedVectorsCache.Prefetch(candidates.Top().ID)
+					}
+				} else {
+					if candidates.Len() > 0 {
+						h.cache.Prefetch(candidates.Top().ID)
+					}
+				}
+
+				// +1 because we have added one node size calculating the len
+				if results.Len() > ef {
+					results.Pop()
+				}
+
+				if results.Len() > 0 {
+					worstResultDistance = results.Top().Dist
+				} else {
+					worstResultDistance = math.MaxFloat32
+				}
+			}
+		}
+	}
+
+	h.pools.pqCandidates.Put(candidates)
+
+	h.pools.visitedListsLock.Lock()
+	h.pools.visitedLists.Return(visited)
+	h.pools.visitedListsLock.Unlock()
+
+	return results, nil
+}

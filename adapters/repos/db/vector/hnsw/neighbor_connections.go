@@ -77,7 +77,13 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	eps := priorityqueue.NewMin[any](1)
 	eps.Insert(n.entryPointID, n.entryPointDist)
 
-	results, err := n.graph.searchLayerByVector(n.nodeVec, eps, n.graph.efConstruction,
+	efConstruction := n.graph.efConstruction
+
+	if n.graph.acorn {
+		efConstruction *= n.graph.acornGamma
+	}
+
+	results, err := n.graph.searchLayerByVector(n.nodeVec, eps, efConstruction,
 		level, nil)
 	if err != nil {
 		return errors.Wrapf(err, "search layer at level %d", level)
@@ -86,10 +92,17 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	n.graph.insertMetrics.findAndConnectSearch(before)
 	before = time.Now()
 
-	// max := n.maximumConnections(level)
-	max := n.graph.maximumConnections
-	if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
-		return errors.Wrap(err, "heuristic")
+	max := n.maximumConnections(level)
+	if level == 0 && n.graph.acorn {
+		max *= n.graph.acornGamma
+		if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
+			n.graph.Unlock()
+			return errors.Wrap(err, "acorn heuristic")
+		}
+	} else {
+		if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
+			return errors.Wrap(err, "heuristic")
+		}
 	}
 
 	n.graph.insertMetrics.findAndConnectHeuristic(before)
@@ -108,6 +121,7 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 
 	// set all outgoing in one go
 	n.node.setConnectionsAtLevel(level, neighbors)
+
 	n.graph.commitLog.ReplaceLinksAtLevel(n.node.id, level, neighbors)
 
 	for _, neighborID := range neighbors {

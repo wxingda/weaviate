@@ -37,9 +37,11 @@ import (
 )
 
 var HNSW_EFG *bool
+var ACORN *bool
 
 func init() {
 	HNSW_EFG = flag.Bool("HNSW_EFG", false, "Enable HNSW-EFG")
+	ACORN = flag.Bool("ACORN", false, "Enable ACORN")
 	go func() {
 		runtime.SetBlockProfileRate(1)
 		http.ListenAndServe("localhost:6060", nil)
@@ -78,10 +80,14 @@ func TestFilteredRecall(t *testing.T) {
 		fmt.Println("Running HNSW without EFG")
 		hnsw_efg = false
 	}
-	/* HNSW PARAMETERS */
-	efConstruction := 256
-	ef := 256
-	maxNeighbors := 64
+	var acorn bool
+	if *ACORN {
+		fmt.Println("Running ACORN")
+		acorn = true
+	} else {
+		fmt.Println("Running HNSW withou ACORN")
+		acorn = false
+	}
 
 	/* DATA STUCTURES FOR TESTING */
 	var indexVectors []Vector
@@ -96,13 +102,13 @@ func TestFilteredRecall(t *testing.T) {
 		/* READ VECTORS, FILTERS, AND GROUND TRUTHS FROM JSONS */
 		/* USING THE SAME INDEX VECTORS FOR ALL FILTER LEVELS */
 		fmt.Println("Loading vectors...")
-		indexVectorsJSON, err := ioutil.ReadFile("./datasets/filtered/indexVectors-1M.json")
+		indexVectorsJSON, err := ioutil.ReadFile("./datasets/filtered/indexVectors_100K.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(indexVectorsJSON, &indexVectors)
 		require.Nil(t, err)
 		fmt.Println("Loading vectors...")
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
-		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-1M-5-2_0.json")
+		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-100K-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(indexFiltersJSON, &indexFilters)
 		require.Nil(t, err)
@@ -111,26 +117,32 @@ func TestFilteredRecall(t *testing.T) {
 		/* IDEA -- SHUFFLE VECTORS TO AVOID CONFOUNDING WITH INSERT ORDER */
 		/* USE THE SAME QUERY VECTORS FOR ALL FILTER LEVELS */
 		fmt.Println("Loading vectors...")
-		queryVectorsJSON, err := ioutil.ReadFile("./datasets/filtered/queryVectors-1M.json")
+		queryVectorsJSON, err := ioutil.ReadFile("./datasets/filtered/queryVectors_100K.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(queryVectorsJSON, &queryVectors)
 		require.Nil(t, err)
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
 		fmt.Println("Loading vectors...")
-		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-1M-5-2_0.json")
+		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-100K-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(queryFiltersJSON, &queryFilters)
 		/* MERGE QUERY VECTORS WITH FILTERS */
 		queryVectorsWithFilters := mergeData(queryVectors, queryFilters)
 		/* LOAD GROUND TRUTHS */
 		fmt.Println("Loading vectors...")
-		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered-recall-truths-1M-5-2_0.json")
+		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered_recall_truths-100K-2-99_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(truthsJSON, &truths)
 		require.Nil(t, err)
 		/* FINISHED LOADING VECTORS, FILTERS, and GROUNDTRUTHS */
 		fmt.Printf("Finished loading vectors, now importing into HNSW...\n")
 		/* INITIALIZE INDEX */
+		/* HNSW PARAMETERS */
+		efConstruction := 256
+		ef := 256
+		maxNeighbors := 64
+		acornGamma := 10
+		acornMBeta := 32
 		index, err := New(Config{
 			RootPath:              "doesnt-matter-as-commitlogger-is-mocked-out",
 			ID:                    "recallbenchmark",
@@ -143,6 +155,9 @@ func TestFilteredRecall(t *testing.T) {
 			MaxConnections: maxNeighbors,
 			EFConstruction: efConstruction,
 			EF:             ef,
+			ACORN:          acorn,
+			ACORNGamma:     acornGamma,
+			ACORNMBeta:     acornMBeta,
 		}, cyclemanager.NewCallbackGroupNoop(), cyclemanager.NewCallbackGroupNoop(),
 			cyclemanager.NewCallbackGroupNoop(), newDummyStore(t))
 		vectorIndex = index
@@ -195,10 +210,10 @@ func TestFilteredRecall(t *testing.T) {
 		fmt.Printf("Importing took %s \n", time.Since(before))
 		/* ADDING FILTER SHARING NEIGHBORS AFTER THE GRAPH HAS BEEN BUILT */
 		// Turn off Interventions here to record original Latency / Recall
+		// TODO, replace with deriving from data
+		minorityFilter := map[int]int{0: 1} // Now this is really a ToDo
 		if hnsw_efg {
 			addEdgesTimer := time.Now()
-			// TODO, replace with deriving from data
-			minorityFilter := map[int]int{0: 4} // Now this is really a ToDo
 			// ToDo Add Multi-Threaded Graph Repair
 			workerCount = runtime.GOMAXPROCS(0)
 			jobsForGraphRepairWorker := make([][]*vertex, 0, workerCount) // NOTE, UPDATED
@@ -241,7 +256,7 @@ func TestFilteredRecall(t *testing.T) {
 						/*
 							Note: CHANGED VAL == 0 TO VAL != 4 FOR MULTI-LABEL, CONNECT ALL MAJORITY NODES
 						*/
-						if val, ok := nodeFilter[0]; !ok || val != 4 {
+						if val, ok := nodeFilter[0]; !ok || val != 1 {
 							// Majority node, connect to minority nodes
 							// Before Intervention Log
 							minorityAllowList := buildAllowList(minorityFilter, filterToIDs)
@@ -272,7 +287,7 @@ func TestFilteredRecall(t *testing.T) {
 		// Init Latencies Per Filter
 		// ToDo - Derive the filters from somewhere else rather than hardcoding them.
 		// AGAIN, GET THIS FROM THE DATA!!
-		allFilters := []map[int]int{{0: 0}, {0: 1}, {0: 2}, {0: 3}, {0: 4}}
+		allFilters := []map[int]int{{0: 0}, {0: 1}}
 		for _, filterMap := range allFilters {
 			for outerFilter, innerFilter := range filterMap {
 				if _, exists := LatenciesPerFilter[outerFilter]; !exists {
@@ -295,11 +310,15 @@ func TestFilteredRecall(t *testing.T) {
 			queryAllowList := helpers.NewAllowList(allowListIDs...)
 			queryStart := time.Now()
 			if hnsw_efg {
-				if queryFilters[0] == 4 {
+				if isMinorityFilter(queryFilters, minorityFilter) {
+					//results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 					results, _, err = vectorIndex.FilteredSearchWithExtendedGraph(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 				} else {
 					results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 				}
+			} else if acorn {
+				//results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
+				results, _, err = vectorIndex.ACORNSearch(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 			} else {
 				results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 			}
@@ -462,4 +481,13 @@ func average(values []float32) float32 {
 		sum += v
 	}
 	return sum / float32(len(values))
+}
+
+func isMinorityFilter(queryFilters, minorityFilter map[int]int) bool {
+	for k, v := range minorityFilter {
+		if queryFilters[k] != v {
+			return false
+		}
+	}
+	return true
 }

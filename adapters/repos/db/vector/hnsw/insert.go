@@ -151,6 +151,9 @@ func (h *hnsw) addOne(vector []float32, node *vertex) error {
 		if i == 0 {
 			capacity = h.maximumConnectionsLayerZero
 		}
+		if h.acorn {
+			capacity *= h.acornGamma
+		}
 
 		node.connections[i] = make([]uint64, 0, capacity)
 	}
