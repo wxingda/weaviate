@@ -56,22 +56,33 @@ void hamming_byte_256(unsigned char *a, unsigned char *b, unsigned int *res, lon
         __m256i cmp_result_high = _mm256_cmpeq_epi16(a_high, b_high);
         __m256i cmp_result_low = _mm256_cmpeq_epi16(a_low, b_low);
 
-        cmp_result_high = _mm256_srli_epi16(cmp_result_high, 7);
-        cmp_result_low = _mm256_srli_epi16(cmp_result_low, 7);
+        cmp_result_high = _mm256_srli_epi16(cmp_result_high, 15);
+        cmp_result_low = _mm256_srli_epi16(cmp_result_low, 15);
 
-        __m256i sum = _mm256_add_epi32(cmp_result_low, cmp_result_high);
+        __m256i sum = _mm256_add_epi16(cmp_result_low, cmp_result_high);
 
-        acc = _mm256_add_epi32(acc, sum);
+        __m128i sum_lower = _mm256_extracti128_si256(sum, 0);
+        __m128i sum_upper = _mm256_extracti128_si256(sum, 1);
+        __m256i sum_epi32 = _mm256_cvtepi16_epi32(sum_lower);
+
+        sum_epi32 = _mm256_add_epi32(sum_epi32, _mm256_cvtepi16_epi32(sum_upper));
+
+        acc = _mm256_add_epi32(acc, sum_epi32);
     }
 
     // Reduce
     __m128i acc_low = _mm256_extracti128_si256(acc, 0);
     __m128i acc_high = _mm256_extracti128_si256(acc, 1);
-    __m128i acc128 = _mm_add_epi32(acc_low, acc_high);
-    acc128 = _mm_add_epi32(acc128, _mm_shuffle_epi32(acc128, _MM_SHUFFLE(0, 1, 2, 3)));
-    acc128 = _mm_add_epi32(acc128, _mm_shuffle_epi32(acc128, _MM_SHUFFLE(0, 0, 0, 1)));
+    __m128i acc128 = _mm_add_epi16(acc_low, acc_high);
+    // Perform horizontal adds by shuffling and adding
+    acc128 = _mm_add_epi16(acc128, _mm_shuffle_epi32(acc128, _MM_SHUFFLE(1, 0, 3, 2)));
+    acc128 = _mm_add_epi16(acc128, _mm_shuffle_epi32(acc128, _MM_SHUFFLE(2, 3, 0, 1)));
+    acc128 = _mm_add_epi16(acc128, _mm_shufflelo_epi16(acc128, _MM_SHUFFLE(0, 1, 2, 3)));
+    acc128 = _mm_add_epi16(acc128, _mm_srli_si128(acc128, 2)); // Shift and add to accumulate upper parts
+    acc128 = _mm_add_epi16(acc128, _mm_srli_si128(acc128, 4)); // Continue shifting and adding
 
-    int result = _mm_extract_epi32(acc128, 0);
+    // At this point, the sum should be in the lowest 16-bit of the vector.
+    int result = _mm_extract_epi16(acc128, 0); // Extract the 16-bit sum
 
     // Tail
     for (; i < n; i++)
