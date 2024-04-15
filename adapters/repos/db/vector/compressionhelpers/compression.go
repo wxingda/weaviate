@@ -300,7 +300,7 @@ func NewSQCompressor(
 	data [][]float32,
 	store *lsmkv.Store,
 ) (VectorCompressor, error) {
-	quantizer := NewScalarQuantizer(data, distance)
+	quantizer := NewLocallyAdaptiveScalarQuantizer(data, distance)
 	sqVectorsCompressor := &quantizedVectorsCompressor[byte]{
 		quantizer:       quantizer,
 		compressedStore: store,
