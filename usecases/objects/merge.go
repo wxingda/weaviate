@@ -69,7 +69,7 @@ func (m *Manager) MergeObject(ctx context.Context, principal *models.Principal,
 		return &Error{"not found", StatusNotFound, err}
 	}
 
-	if err = m.autoSchemaManager.autoSchema(ctx, principal, false, updates); err != nil {
+	if _, errs := m.autoSchemaManager.autoSchema(ctx, principal, false, updates); len(errs) > 0 && errs[0] != nil {
 		return &Error{"bad request", StatusBadRequest, NewErrInvalidUserInput("invalid object: %v", err)}
 	}
 

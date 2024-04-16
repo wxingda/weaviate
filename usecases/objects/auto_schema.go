@@ -51,46 +51,59 @@ func newAutoSchemaManager(schemaManager schemaManager, vectorRepo VectorRepo,
 
 func (m *autoSchemaManager) autoSchema(ctx context.Context, principal *models.Principal,
 	allowCreateClass bool, objects ...*models.Object,
-) error {
+) ([]*models.Class, []error) {
 	if !m.config.Enabled {
-		return nil
+		return nil, nil
 	}
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-
-	for _, object := range objects {
+	var class []*models.Class
+	var errors []error
+	for idx, object := range objects {
 		if object == nil {
-			return fmt.Errorf(validation.ErrorMissingObject)
+			errors[idx] = fmt.Errorf(validation.ErrorMissingObject)
+			continue
 		}
 
 		if len(object.Class) == 0 {
 			// stop performing auto schema
-			return fmt.Errorf(validation.ErrorMissingClass)
+			errors[idx] = fmt.Errorf(validation.ErrorMissingClass)
+			continue
 		}
 
 		object.Class = schema.UppercaseClassName(object.Class)
 
 		schemaClass, _, err := m.schemaManager.GetClass(ctx, principal, object.Class)
 		if err != nil {
-			return err
+			errors[idx] = err
+			continue
 		}
+		class[idx] = schemaClass
 		if schemaClass == nil && !allowCreateClass {
-			return fmt.Errorf("given class does not exist")
+			errors[idx] = fmt.Errorf("given class does not exist")
+			continue
 		}
 		properties, err := m.getProperties(object)
 		if err != nil {
-			return err
+			errors[idx] = err
+			continue
 		}
 		if schemaClass == nil {
-			return m.createClass(ctx, principal, object.Class, properties)
+			if err = m.createClass(ctx, principal, object.Class, properties); err != nil {
+				errors[idx] = err
+			}
+			// TODO - mooga get created class
+			class[idx] = schemaClass
+			continue
 		}
 
 		if _, err := m.schemaManager.AddClassProperty(ctx, principal, schemaClass, true, properties...); err != nil {
-			return err
+			errors[idx] = err
+			continue
 		}
 	}
-	return nil
+	return class, errors
 }
 
 func (m *autoSchemaManager) createClass(ctx context.Context, principal *models.Principal,
