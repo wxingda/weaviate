@@ -9,7 +9,7 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package generative_palm_tests
+package tests
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ import (
 	graphqlhelper "github.com/weaviate/weaviate/test/helper/graphql"
 )
 
-func testGenerativePaLM(host, gcpProject string) func(t *testing.T) {
+func testText2VecPaLM(host, gcpProject string) func(t *testing.T) {
 	return func(t *testing.T) {
 		helper.SetupClient(host)
 		// Data
@@ -62,63 +62,69 @@ func testGenerativePaLM(host, gcpProject string) func(t *testing.T) {
 				`,
 			},
 		}
-		// Define class
-		className := "BooksGenerativeTest"
-		class := &models.Class{
-			Class: className,
-			Properties: []*models.Property{
-				{
-					Name: "name", DataType: []string{schema.DataTypeText.String()},
-				},
-				{
-					Name: "description", DataType: []string{schema.DataTypeText.String()},
-				},
-			},
-			VectorConfig: map[string]models.VectorConfig{
-				"description": {
-					Vectorizer: map[string]interface{}{
-						"text2vec-palm": map[string]interface{}{
-							"properties":         []interface{}{"description"},
-							"vectorizeClassName": false,
-							"projectId":          gcpProject,
-							"modelId":            "textembedding-gecko@001",
-						},
-					},
-					VectorIndexType: "flat",
-				},
-			},
-		}
 		tests := []struct {
-			name            string
-			generativeModel string
+			name  string
+			model string
 		}{
 			{
-				name:            "chat-bison",
-				generativeModel: "chat-bison",
+				name:  "textembedding-gecko@001",
+				model: "textembedding-gecko@001",
 			},
 			{
-				name:            "chat-bison-32k",
-				generativeModel: "chat-bison-32k",
+				name:  "textembedding-gecko@latest",
+				model: "textembedding-gecko@latest",
 			},
 			{
-				name:            "chat-bison@002",
-				generativeModel: "chat-bison@002",
+				name:  "textembedding-gecko-multilingual@latest",
+				model: "textembedding-gecko-multilingual@latest",
 			},
 			{
-				name:            "chat-bison-32k@002",
-				generativeModel: "chat-bison-32k@002",
+				name:  "textembedding-gecko@003",
+				model: "textembedding-gecko@003",
 			},
 			{
-				name:            "chat-bison@001",
-				generativeModel: "chat-bison@001",
+				name:  "textembedding-gecko@002",
+				model: "textembedding-gecko@002",
+			},
+			{
+				name:  "textembedding-gecko-multilingual@001",
+				model: "textembedding-gecko-multilingual@001",
+			},
+			{
+				name:  "text-embedding-preview-0409",
+				model: "text-embedding-preview-0409",
+			},
+			{
+				name:  "text-multilingual-embedding-preview-0409",
+				model: "text-multilingual-embedding-preview-0409",
 			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				class.ModuleConfig = map[string]interface{}{
-					"generative-palm": map[string]interface{}{
-						"projectId": gcpProject,
-						"modelId":   tt.generativeModel,
+				// Define class
+				className := "BooksGenerativeTest"
+				class := &models.Class{
+					Class: className,
+					Properties: []*models.Property{
+						{
+							Name: "name", DataType: []string{schema.DataTypeText.String()},
+						},
+						{
+							Name: "description", DataType: []string{schema.DataTypeText.String()},
+						},
+					},
+					VectorConfig: map[string]models.VectorConfig{
+						"description": {
+							Vectorizer: map[string]interface{}{
+								"text2vec-palm": map[string]interface{}{
+									"properties":         []interface{}{"description"},
+									"vectorizeClassName": false,
+									"projectId":          gcpProject,
+									"modelId":            tt.model,
+								},
+							},
+							VectorIndexType: "flat",
+						},
 					},
 				}
 				// create schema
@@ -150,30 +156,24 @@ func testGenerativePaLM(host, gcpProject string) func(t *testing.T) {
 						})
 					}
 				})
-				// generative task
-				t.Run("create a tweet", func(t *testing.T) {
-					prompt := "Generate a funny tweet out of this content: {description}"
+				// vector search
+				t.Run("perform vector search", func(t *testing.T) {
 					query := fmt.Sprintf(`
 						{
 							Get {
-								%s{
+								%s(
+									nearText:{
+										concepts:["SpaceX"]
+									}
+								){
 									name
 									_additional {
-										generate(
-											singleResult: {
-												prompt: """
-													%s
-												"""
-											}
-										) {
-											singleResult
-											error
-										}
+										id
 									}
 								}
 							}
 						}
-					`, class.Class, prompt)
+					`, class.Class)
 					result := graphqlhelper.AssertGraphQL(t, helper.RootAuth, query)
 					objs := result.Get("Get", class.Class).AsSlice()
 					require.Len(t, objs, 2)
@@ -183,14 +183,9 @@ func testGenerativePaLM(host, gcpProject string) func(t *testing.T) {
 						additional, ok := obj.(map[string]interface{})["_additional"].(map[string]interface{})
 						require.True(t, ok)
 						require.NotNil(t, additional)
-						generate, ok := additional["generate"].(map[string]interface{})
+						id, ok := additional["id"].(string)
 						require.True(t, ok)
-						require.NotNil(t, generate)
-						require.Nil(t, generate["error"])
-						require.NotNil(t, generate["singleResult"])
-						singleResult, ok := generate["singleResult"].(string)
-						require.True(t, ok)
-						require.NotEmpty(t, singleResult)
+						require.NotEmpty(t, id)
 					}
 				})
 			})
