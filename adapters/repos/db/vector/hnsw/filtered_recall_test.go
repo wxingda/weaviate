@@ -108,7 +108,7 @@ func TestFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		fmt.Println("Loading vectors...")
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
-		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-100K-2-99_0.json")
+		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-100K-2-80_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(indexFiltersJSON, &indexFilters)
 		require.Nil(t, err)
@@ -123,14 +123,14 @@ func TestFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
 		fmt.Println("Loading vectors...")
-		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-100K-2-99_0.json")
+		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-100K-2-80_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(queryFiltersJSON, &queryFilters)
 		/* MERGE QUERY VECTORS WITH FILTERS */
 		queryVectorsWithFilters := mergeData(queryVectors, queryFilters)
 		/* LOAD GROUND TRUTHS */
 		fmt.Println("Loading vectors...")
-		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered_recall_truths-100K-2-99_0.json")
+		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered_recall_truths-100K-2-80_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(truthsJSON, &truths)
 		require.Nil(t, err)

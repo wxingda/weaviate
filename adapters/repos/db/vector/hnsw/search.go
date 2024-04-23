@@ -1136,18 +1136,23 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 		}
 
 		neighbors := make([]uint64, 0, len(candidateNode.connections[level]))
-		compressionHeuristic := false
+		compressionHeuristic := true
 		if compressionHeuristic {
 			for i, neighborID := range candidateNode.connections[level] {
-				if i < M_beta {
+				if i < h.acornMBeta {
 					if allowList.Contains(neighborID) {
 						neighbors = append(neighbors, neighborID)
 					}
 				} else {
-					for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
-						if allowList.Contains(neighborOfNeighborID) {
-							neighbors = append(neighbors, neighborOfNeighborID)
+					neighborNode := h.nodes[neighborID]
+					if neighborNode != nil {
+						neighborNode.Lock()
+						for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
+							if allowList.Contains(neighborOfNeighborID) {
+								neighbors = append(neighbors, neighborOfNeighborID)
+							}
 						}
+						neighborNode.Unlock()
 					}
 				}
 			}
@@ -1158,16 +1163,10 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 				}
 			}
 		}
-		neighbors = neighbors[:min(len(neighbors), M)]
+		neighbors = neighbors[:min(len(neighbors), h.maximumConnections)]
+		connectionsReusable = connectionsReusable[:len(neighbors)]
 
-		if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero*h.acornGamma {
-			// it should never call this
-			connectionsReusable = make([]uint64, len(candidateNode.connections[level])*h.acornGamma)
-		} else {
-			connectionsReusable = connectionsReusable[:len(candidateNode.connections[level])]
-		}
-
-		copy(connectionsReusable, candidateNode.connections[level])
+		copy(connectionsReusable, neighbors)
 		candidateNode.Unlock()
 
 		for _, neighborID := range connectionsReusable {
@@ -1195,10 +1194,13 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 
 			if distance < worstResultDistance || results.Len() < ef {
 				// These neighbors are already filtered such that they are on the allowList.
+				candidates.Insert(neighborID, distance) // the neighborID has already been filtered
 
-				if err != nil {
-					return nil, errors.Wrap(err, "acorn get neighbors")
+				if h.hasTombstone(neighborID) {
+					continue
 				}
+
+				results.Insert(neighborID, distance)
 
 				if h.compressed.Load() {
 					if candidates.Len() > 0 {
@@ -1217,8 +1219,6 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 
 				if results.Len() > 0 {
 					worstResultDistance = results.Top().Dist
-				} else {
-					worstResultDistance = math.MaxFloat32
 				}
 			}
 		}
