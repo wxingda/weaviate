@@ -318,11 +318,14 @@ func mergeDocFromBatchReference(ref objects.BatchReference) objects.MergeDocumen
 }
 
 func (b *referencesBatcher) flushWALs(ctx context.Context) {
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs referencesBatcher start\n", b.shard.Name())
 	if err := b.shard.Store().WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs flushWALs referencesBatcher err %q\n", b.shard.Name(), err)
 		for i := range b.refs {
 			b.setErrorAtIndex(err, i)
 		}
 	}
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs referencesBatcher end\n", b.shard.Name())
 
 	if b.shard.hasTargetVectors() {
 		for targetVector, vectorIndex := range b.shard.VectorIndexes() {

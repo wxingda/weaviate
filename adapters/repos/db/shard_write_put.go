@@ -90,9 +90,12 @@ func (s *Shard) putOne(ctx context.Context, uuid []byte, object *storobj.Object)
 		return errors.Wrap(err, "update property-specific indices")
 	}
 
+	fmt.Printf("  ==> [%s] WriteWALs putOne start\n", s.name)
 	if err := s.store.WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs putOne err %q\n", s.name, err)
 		return errors.Wrap(err, "flush all buffered WALs")
 	}
+	fmt.Printf("  ==> [%s] WriteWALs putOne end\n", s.name)
 
 	if err := s.GetPropertyLengthTracker().Flush(false); err != nil {
 		return errors.Wrap(err, "flush prop length tracker to disk")

@@ -88,9 +88,12 @@ func (s *Shard) merge(ctx context.Context, idBytes []byte, doc objects.MergeDocu
 		return errors.Wrap(err, "update property-specific indices")
 	}
 
+	fmt.Printf("  ==> [%s] WriteWALs merge start\n", s.name)
 	if err := s.store.WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs merge err %q\n", s.name, err)
 		return errors.Wrap(err, "flush all buffered WALs")
 	}
+	fmt.Printf("  ==> [%s] WriteWALs merge\n", s.name)
 
 	return nil
 }

@@ -206,6 +206,11 @@ func (db *localDB) UpdateTenants(cmd *command.ApplyRequest, schemaOnly bool) (n 
 		return 0, fmt.Errorf("%w: %w", errBadRequest, err)
 	}
 
+	m := make(map[string][]string)
+	for _, t := range req.Tenants {
+		m[t.Status] = append(m[t.Status], t.Name)
+	}
+	fmt.Printf("  ====> [] incoming UpdateTenants %v\n", m)
 	return n, db.apply(
 		applyOp{
 			op:           cmd.GetType().String(),

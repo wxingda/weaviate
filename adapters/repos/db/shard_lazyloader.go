@@ -413,6 +413,7 @@ func (l *LazyLoadShard) Queues() map[string]*IndexQueue {
 
 func (l *LazyLoadShard) Shutdown(ctx context.Context) error {
 	if !l.isLoaded() {
+		fmt.Printf("  ==> [%s] LazyLoadShard::Shutdown !loaded\n", l.Name())
 		return nil
 	}
 	return l.shard.Shutdown(ctx)

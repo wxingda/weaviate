@@ -53,6 +53,9 @@ func asyncEnabled() bool {
 func (s *Shard) putBatch(ctx context.Context,
 	objects []*storobj.Object,
 ) []error {
+	fmt.Printf("  ==> [%s] putBatch start\n", s.Name())
+	defer fmt.Printf("  ==> [%s] putBatch end\n", s.Name())
+
 	if asyncEnabled() {
 		return s.putBatchAsync(ctx, objects)
 	}
@@ -79,6 +82,7 @@ func (s *Shard) putBatchAsync(ctx context.Context, objects []*storobj.Object) []
 	batcher.storeInObjectStore(ctx)
 	batcher.markDeletedInVectorStorage(ctx)
 	batcher.storeAdditionalStorageWithAsyncQueue(ctx)
+	fmt.Printf("  ==> [%s] putBatchAsync flushWALs objectsBatcher start\n", s.Name())
 	batcher.flushWALs(ctx)
 
 	return batcher.errs
@@ -113,6 +117,7 @@ func (ob *objectsBatcher) Objects(ctx context.Context,
 	ob.storeInObjectStore(ctx)
 	ob.markDeletedInVectorStorage(ctx)
 	ob.storeAdditionalStorageWithWorkers(ctx)
+	fmt.Printf("  ==> [%s] Objects flushWALs objectsBatcher start\n", ob.shard.Name())
 	ob.flushWALs(ctx)
 	return ob.errs
 }
@@ -487,11 +492,14 @@ func (ob *objectsBatcher) checkContext(ctx context.Context) bool {
 }
 
 func (ob *objectsBatcher) flushWALs(ctx context.Context) {
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher start\n", ob.shard.Name())
 	if err := ob.shard.Store().WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher err %q\n", ob.shard.Name(), err)
 		for i := range ob.objects {
 			ob.setErrorAtIndex(err, i)
 		}
 	}
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher end\n", ob.shard.Name())
 
 	if ob.shard.hasTargetVectors() {
 		for targetVector, vectorIndex := range ob.shard.VectorIndexes() {

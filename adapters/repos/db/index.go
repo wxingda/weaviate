@@ -388,6 +388,9 @@ func (i *Index) initAndStoreShards(ctx context.Context, shardState *sharding.Sta
 func (i *Index) initAndStoreShard(ctx context.Context, shardName string, class *models.Class,
 	promMetrics *monitoring.PrometheusMetrics,
 ) error {
+	fmt.Printf("  ==> [%s] initAndStoreShard start\n", shardName)
+	defer fmt.Printf("  ==> [%s] initAndStoreShard defer\n", shardName)
+
 	if i.Config.DisableLazyLoadShards {
 		if err := i.allocChecker.CheckMappingAndReserve(3, int(lsmkv.FlushAfterDirtyDefault.Seconds())); err != nil {
 			return errors.Wrap(err, "memory pressure: cannot init shard")
@@ -402,6 +405,7 @@ func (i *Index) initAndStoreShard(ctx context.Context, shardName string, class *
 	}
 
 	shard := NewLazyLoadShard(ctx, promMetrics, shardName, i, class, i.centralJobQueue, i.indexCheckpoints, i.allocChecker)
+	fmt.Printf("  ==> [%s] initAndStoreShard store\n", shardName)
 	i.shards.Store(shardName, shard)
 	return nil
 }
@@ -770,6 +774,10 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 		objects []*storobj.Object
 		pos     []int
 	}
+
+	fmt.Printf("  ==> [%s] putObjectBatch start\n", i.ID())
+	defer fmt.Printf("  ==> [%s] putObjectBatch end\n", i.ID())
+
 	out := make([]error, len(objects))
 	if i.replicationEnabled() && replProps == nil {
 		replProps = defaultConsistency()
@@ -835,6 +843,9 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 					replica.ConsistencyLevel(replProps.ConsistencyLevel), schemaVersion)
 			} else if shard := i.localShard(shardName); shard != nil {
 				i.backupMutex.RLockGuard(func() error {
+					fmt.Printf("  ==> [%s] putObjectBatch start\n", shard.Name())
+					defer fmt.Printf("  ==> [%s] putObjectBatch end\n", shard.Name())
+
 					errs = shard.PutObjectBatch(ctx, group.objects)
 					return nil
 				})
@@ -869,10 +880,13 @@ func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 	i.backupMutex.RLock()
 	defer i.backupMutex.RUnlock()
 
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard before\n", shardName)
 	shard, err := i.getOrInitLocalShard(ctx, shardName)
 	if err != nil {
+		fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard err\n", shardName)
 		return duplicateErr(ErrShardNotFound, len(objects))
 	}
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard end\n", shardName)
 
 	// This is a bit hacky, the problem here is that storobj.Parse() currently
 	// misses date fields as it has no way of knowing that a date-formatted
@@ -1637,7 +1651,11 @@ func (i *Index) localShard(name string) ShardLike {
 // Method first tries to get shard from Index::shards map,
 // or inits shard and adds it to the map if shard was not found
 func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (ShardLike, error) {
+	fmt.Printf("  ==> [%s] getOrInitLocalShard start\n", shardName)
+	defer fmt.Printf("  ==> [%s] getOrInitLocalShard defer\n", shardName)
+
 	if shard := i.shards.Load(shardName); shard != nil {
+		fmt.Printf("  ==> [%s] getOrInitLocalShard loaded\n", shardName)
 		return shard, nil
 	}
 
@@ -1647,12 +1665,16 @@ func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (Shar
 }
 
 func (i *Index) initLocalShard(ctx context.Context, shardName string, class *models.Class) (ShardLike, error) {
+	fmt.Printf("  ==> [%s] initLocalShard start\n", shardName)
+	defer fmt.Printf("  ==> [%s] initLocalShard defer\n", shardName)
+
 	// make sure same shard is not inited in parallel
 	i.shardCreateLocks.Lock(shardName)
 	defer i.shardCreateLocks.Unlock(shardName)
 
 	// check if created in the meantime by concurrent call
 	if shard := i.shards.Load(shardName); shard != nil {
+		fmt.Printf("  ==> [%s] initLocalShard loaded\n", shardName)
 		return shard, nil
 	}
 

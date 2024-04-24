@@ -109,11 +109,14 @@ func (b *deleteObjectsBatcher) flushWALs(ctx context.Context) {
 	before := time.Now()
 	defer b.shard.Metrics().BatchDelete(before, "shard_flush_wals")
 
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs deleteObjectsBatcher start\n", b.shard.Name())
 	if err := b.shard.Store().WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs flushWALs deleteObjectsBatcher err %q\n", b.shard.Name(), err)
 		for i := range b.objects {
 			b.setErrorAtIndex(err, i)
 		}
 	}
+	fmt.Printf("  ==> [%s] WriteWALs flushWALs deleteObjectsBatcher end\n", b.shard.Name())
 
 	if b.shard.hasTargetVectors() {
 		for targetVector, vectorIndex := range b.shard.VectorIndexes() {

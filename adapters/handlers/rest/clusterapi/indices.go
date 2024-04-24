@@ -306,6 +306,7 @@ func (i *indices) postObject() http.Handler {
 
 		switch ct {
 		case IndicesPayloads.ObjectList.MIME():
+			fmt.Printf("  ====> [%s] incoming postObjectBatch\n", shard)
 			i.postObjectBatch(w, r, index, shard)
 			return
 

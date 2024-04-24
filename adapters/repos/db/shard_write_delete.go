@@ -62,10 +62,13 @@ func (s *Shard) DeleteObject(ctx context.Context, id strfmt.UUID) error {
 		return fmt.Errorf("delete object from bucket: %w", err)
 	}
 
+	fmt.Printf("  ==> [%s] WriteWALs DeleteObject start\n", s.name)
 	if err = s.store.WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs DeleteObject err %q\n", s.name, err)
 		return fmt.Errorf("flush all buffered WALs: %w", err)
 	}
-
+	fmt.Printf("  ==> [%s] WriteWALs DeleteObject end\n", s.name)
+	
 	if s.hasTargetVectors() {
 		for targetVector, queue := range s.queues {
 			if err = queue.Delete(docID); err != nil {
@@ -127,9 +130,12 @@ func (s *Shard) deleteOne(ctx context.Context, bucket *lsmkv.Bucket, obj, idByte
 		return fmt.Errorf("delete object from bucket: %w", err)
 	}
 
+	fmt.Printf("  ==> [%s] WriteWALs deleteOne start\n", s.name)
 	if err = s.store.WriteWALs(); err != nil {
+		fmt.Printf("  ==> [%s] WriteWALs deleteOne err %q\n", s.name, err)
 		return fmt.Errorf("flush all buffered WALs: %w", err)
 	}
+	fmt.Printf("  ==> [%s] WriteWALs deleteOne end\n", s.name)
 
 	if s.hasTargetVectors() {
 		for targetVector, queue := range s.queues {
