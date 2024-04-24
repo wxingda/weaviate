@@ -96,7 +96,6 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	if level == 0 && n.graph.acorn {
 		max *= n.graph.acornGamma
 		if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
-			n.graph.Unlock()
 			return errors.Wrap(err, "acorn heuristic")
 		}
 	} else {

@@ -13,6 +13,7 @@ package hnsw
 
 import (
 	"context"
+	"log"
 
 	"github.com/pkg/errors"
 	"github.com/weaviate/weaviate/adapters/repos/db/helpers"
@@ -135,60 +136,74 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 }
 
 func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int, denyList helpers.AllowList) error {
-	// Early exit if the input size is within the allowed limit
 	if input.Len() <= h.acornMBeta {
+		log.Printf("Node %d: Input size (%d) is within the allowed limit (%d)", node.id, input.Len(), h.acornMBeta)
 		return nil
 	}
 
-	// Use a temporary priority queue to store and prioritize neighbors for processing
+	// TODO, if this solution stays we might need something with fewer allocs
+	ids := make([]uint64, 0, input.Len())
+
 	closestFirst := h.pools.pqHeuristic.GetMin(input.Len())
 	defer h.pools.pqHeuristic.Put(closestFirst)
 
-	// Map to keep track of two-hop neighbors
-	twoHopNeighborhood := make(map[uint64]bool)
-	for _, connectedID := range node.connections[0] {
-		twoHopNeighborhood[connectedID] = true
-	}
-
-	// Transfer elements to the closestFirst queue with consideration for the deny list
 	i := uint64(0)
 	for input.Len() > 0 {
 		elem := input.Pop()
-		if denyList != nil && denyList.Contains(elem.ID) {
-			continue
+		if denyList == nil || !denyList.Contains(elem.ID) {
+			closestFirst.InsertWithValue(elem.ID, elem.Dist, i)
+			ids = append(ids, elem.ID)
+			i++
 		}
-		closestFirst.InsertWithValue(elem.ID, elem.Dist, i)
-		i++
 	}
 
-	// Process neighbors, reinserting up to 'max' neighbors back into the input queue
-	returnList := h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
-	defer h.pools.pqItemSlice.Put(returnList[:0])
+	var returnList []priorityqueue.Item[uint64]
+	returnList = h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
 
-	for closestFirst.Len() > 0 && len(returnList) < max {
+	// Keep the first MBeta candidates
+	for i := 0; i < h.acornMBeta && closestFirst.Len() > 0; i++ {
+		elem := closestFirst.Pop()
+		returnList = append(returnList, elem)
+	}
+
+	// Prune the remaining candidates
+	twoHopNeighborhood := make(map[uint64]bool)
+	for closestFirst.Len() > 0 {
 		curr := closestFirst.Pop()
 
-		// Check for direct or two-hop connectivity
 		if _, exists := twoHopNeighborhood[curr.ID]; !exists {
-			// If not directly connected or a two-hop neighbor, evaluate further
-			// This is simplified; actual logic might involve more checks or conditions
+			returnList = append(returnList, curr)
 
 			neighbor := h.nodeByID(curr.ID)
 			if neighbor != nil {
 				for _, connectedID := range neighbor.connections[0] {
 					twoHopNeighborhood[connectedID] = true
-				}
-			}
 
-			// Append to the returnList
-			returnList = append(returnList, curr)
+					// Add the neighbors of the neighbors to the two-hop neighborhood
+					secondNeighbor := h.nodeByID(connectedID)
+					if secondNeighbor != nil {
+						for _, secondConnectedID := range secondNeighbor.connections[0] {
+							twoHopNeighborhood[secondConnectedID] = true
+						}
+					}
+				}
+			} else {
+				log.Printf("Node %d: Neighbor not found for ID: %d", node.id, curr.ID)
+			}
+		}
+
+		if len(twoHopNeighborhood)+len(returnList) >= max*h.acornGamma {
+			break
 		}
 	}
 
-	// Transfer the pruned neighbors from the returnList back to the input queue
 	for _, retElem := range returnList {
 		input.Insert(retElem.ID, retElem.Dist)
 	}
+
+	// rewind and return to pool
+	returnList = returnList[:0]
+	h.pools.pqItemSlice.Put(returnList)
 
 	return nil
 }
