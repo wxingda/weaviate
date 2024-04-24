@@ -12,10 +12,14 @@
 package store
 
 import (
+	"container/heap"
 	"errors"
 	"fmt"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	command "github.com/weaviate/weaviate/cluster/proto/api"
 	"github.com/weaviate/weaviate/entities/models"
@@ -289,25 +293,128 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 
 	// Read tenants using the meta lock guard
 	var res []*models.Tenant
+	limit := 50000
+	after := "/"
 	f := func(_ *models.Class, ss *sharding.State) error {
-		if len(tenants) == 0 {
-			res = make([]*models.Tenant, len(ss.Physical))
-			i := 0
-			for tenant := range ss.Physical {
-				res[i] = makeTenant(tenant, entSchema.ActivityStatus(ss.Physical[tenant].Status))
-				i++
-			}
-		} else {
-			res = make([]*models.Tenant, 0, len(tenants))
-			for _, tenant := range tenants {
-				if status, ok := ss.Physical[tenant]; ok {
-					res = append(res, makeTenant(tenant, entSchema.ActivityStatus(status.Status)))
-				}
-			}
+		if len(tenants) > 0 {
+			measurePerf(func() { res = getTenantsByNames(ss.Physical, tenants) })
+			return nil
 		}
+		// measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
+		// measurePerf(func() { res = getAllTenants_sort(ss.Physical, limit, after) })
+		measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
 		return nil
 	}
 	return res, meta.RLockGuard(f)
+}
+
+func getAllTenants_v0(shards map[string]sharding.Physical) []*models.Tenant {
+	res := make([]*models.Tenant, len(shards))
+	i := 0
+	for tenant := range shards {
+		res[i] = makeTenant(tenant, entSchema.ActivityStatus(shards[tenant].Status))
+		i++
+	}
+	return res
+}
+
+func getAllTenants_sort(shards map[string]sharding.Physical, limit int, after string) []*models.Tenant {
+	sortedTenants := make([]string, len(shards))
+	// TODO replace with append for clarity?
+	i := 0
+	for tenant := range shards {
+		sortedTenants[i] = tenant
+		i++
+	}
+	slices.Sort(sortedTenants)
+	// TODO double check found/index one-off
+	sortedIndex, found := slices.BinarySearch(sortedTenants, after)
+	if found {
+		sortedIndex++
+	}
+	numResults := len(sortedTenants) - sortedIndex
+	if limit < numResults {
+		numResults = limit
+	}
+	res := make([]*models.Tenant, numResults)
+	resultIndex := 0
+	for resultIndex < numResults {
+		tenant := sortedTenants[sortedIndex]
+		sortedIndex++
+		res[resultIndex] = makeTenant(tenant, entSchema.ActivityStatus(shards[tenant].Status))
+		resultIndex++
+	}
+	return res
+}
+
+type stringHeap []string
+
+func (h stringHeap) Len() int           { return len(h) }
+func (h stringHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h stringHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *stringHeap) Push(x any) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	// TODO why doesn't this call up?
+	*h = append(*h, x.(string))
+}
+
+func (h *stringHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+func getAllTenants_heap(shards map[string]sharding.Physical, limit int, after string) []*models.Tenant {
+	tenantsToReturn := &stringHeap{}
+	for tenant := range shards {
+		if tenant <= after {
+			continue
+		}
+		heap.Push(tenantsToReturn, tenant)
+		if tenantsToReturn.Len() > limit {
+			heap.Pop(tenantsToReturn)
+		}
+	}
+	res := make([]*models.Tenant, tenantsToReturn.Len())
+	resIndex := 0
+	// TODO only one of these checks?
+	for tenantsToReturn.Len() > 0 && resIndex < len(res) {
+		tenant := heap.Pop(tenantsToReturn).(string)
+		// this is a min heap, so popping gives tenants in sorted order
+		res[resIndex] = makeTenant(tenant, entSchema.ActivityStatus(shards[tenant].Status))
+		resIndex++
+	}
+	return res
+}
+
+func getTenantsByNames(shards map[string]sharding.Physical, tenants []string) []*models.Tenant {
+	res := make([]*models.Tenant, 0, len(tenants))
+	for _, tenant := range tenants {
+		if status, ok := shards[tenant]; ok {
+			res = append(res, makeTenant(tenant, entSchema.ActivityStatus(status.Status)))
+		}
+	}
+	return res
+}
+
+func measurePerf(f func()) {
+	timeBefore := time.Now()
+	memBefore := runtime.MemStats{}
+	runtime.ReadMemStats(&memBefore)
+	f()
+	memAfter := runtime.MemStats{}
+	runtime.ReadMemStats(&memAfter)
+	timeAfter := time.Now()
+	memAllocDiff := memAfter.Alloc - memBefore.Alloc
+	memTotalAllocDiff := memAfter.TotalAlloc - memBefore.TotalAlloc
+	timeDiffNano := timeAfter.UnixNano() - timeBefore.UnixNano()
+	fmt.Println("MEASUREPERF:MEMALLOC:", memAllocDiff)
+	fmt.Println("MEASUREPERF:MEMTOTALALLOC:", memTotalAllocDiff)
+	fmt.Println("MEASUREPERF:TIMEDIFFNS:", timeDiffNano)
 }
 
 func (s *schema) States() map[string]ClassState {
