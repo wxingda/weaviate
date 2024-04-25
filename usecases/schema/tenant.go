@@ -141,6 +141,13 @@ func (h *Handler) UpdateTenants(ctx context.Context, principal *models.Principal
 	for i, tenant := range tenants {
 		req.Tenants[i] = &api.Tenant{Name: tenant.Name, Status: tenant.ActivityStatus}
 	}
+
+	m := make(map[string][]string)
+	for _, t := range req.Tenants {
+		m[t.Status] = append(m[t.Status], t.Name)
+	}
+	fmt.Printf("  ====> [] handler UpdateTenants %v\n", m)
+
 	_, err = h.metaWriter.UpdateTenants(class, &req)
 	return err
 }

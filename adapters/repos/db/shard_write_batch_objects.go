@@ -38,6 +38,12 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		return []error{storagestate.ErrStatusReadOnly}
 	}
 
+	s.shutdownLock.RLock()
+	defer s.shutdownLock.RUnlock()
+	if s.shut {
+		return []error{fmt.Errorf("already shut or dropped")}
+	}
+
 	return s.putBatch(ctx, objects)
 }
 

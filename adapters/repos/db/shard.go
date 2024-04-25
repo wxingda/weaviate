@@ -209,6 +209,8 @@ type Shard struct {
 	bitmapFactory  *roaringset.BitmapFactory
 
 	activityTracker atomic.Int32
+	shut         bool
+	shutdownLock *sync.RWMutex
 }
 
 func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
@@ -227,6 +229,9 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		replicationMap:   pendingReplicaTasks{Tasks: make(map[string]replicaTask, 32)},
 		centralJobQueue:  jobQueueCh,
 		indexCheckpoints: indexCheckpoints,
+
+		shut:         false,
+		shutdownLock: new(sync.RWMutex),
 	}
 
 	s.activityTracker.Store(1) // initial state
@@ -604,7 +609,16 @@ func (s *Shard) initLSMStore(ctx context.Context) error {
 // If there is any action that needs to be performed beside files/dirs being removed
 // from shard directory, it needs to be reflected as well in LazyLoadShard::drop()
 // method to keep drop behaviour consistent.
-func (s *Shard) drop() error {
+func (s *Shard) drop() (err error) {
+	s.shutdownLock.Lock()
+	defer s.shutdownLock.Unlock()
+
+	defer func() {
+		if err == nil {
+			s.shut = true
+		}
+	}()
+
 	s.metrics.DeleteShardLabels(s.index.Config.ClassName.String(), s.name)
 	s.metrics.baseMetrics.StartUnloadingShard(s.index.Config.ClassName.String())
 	s.replicationMap.clear()
@@ -621,7 +635,7 @@ func (s *Shard) drop() error {
 	defer cancel()
 
 	// unregister all callbacks at once, in parallel
-	if err := cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
 		s.cycleCallbacks.compactionCallbacksCtrl,
 		s.cycleCallbacks.flushCallbacksCtrl,
 		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
@@ -630,18 +644,18 @@ func (s *Shard) drop() error {
 		return err
 	}
 
-	if err := s.store.Shutdown(ctx); err != nil {
+	if err = s.store.Shutdown(ctx); err != nil {
 		return errors.Wrap(err, "stop lsmkv store")
 	}
 
-	if _, err := os.Stat(s.pathLSM()); err == nil {
+	if _, err = os.Stat(s.pathLSM()); err == nil {
 		err := os.RemoveAll(s.pathLSM())
 		if err != nil {
 			return errors.Wrapf(err, "remove lsm store at %s", s.pathLSM())
 		}
 	}
 	// delete indexcount
-	err := s.counter.Drop()
+	err = s.counter.Drop()
 	if err != nil {
 		return errors.Wrapf(err, "remove indexcount at %s", s.path())
 	}
@@ -941,14 +955,38 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 	return err
 }
 
-func (s *Shard) Shutdown(ctx context.Context) error {
+func (s *Shard) Shutdown(ctx context.Context) (err error) {
+	if !s.shutdownLock.TryLock() {
+		t := time.NewTicker(50 * time.Millisecond)
+		defer t.Stop()
+
+		for {
+			select {
+			case <-t.C:
+				if s.shutdownLock.TryLock() {
+					break
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	// s.shutdownLock.Lock()
+	defer s.shutdownLock.Unlock()
+
+	defer func() {
+		if err == nil {
+			s.shut = true
+		}
+	}()
+
 	if s.index.Config.TrackVectorDimensions {
 		// tracking vector dimensions goroutine only works when tracking is enabled
 		// that's why we are trying to stop it only in this case
 		s.stopMetrics <- struct{}{}
 	}
 
-	var err error
 	if err = s.GetPropertyLengthTracker().Close(); err != nil {
 		return errors.Wrap(err, "close prop length tracker")
 	}

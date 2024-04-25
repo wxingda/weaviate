@@ -825,6 +825,9 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 		group := group
 		wg.Add(1)
 		f := func() {
+			fmt.Printf("  ==> [%s] putObjectBatch routine start\n", shardName)
+			defer fmt.Printf("  ==> [%s] putObjectBatch routine end\n", shardName)
+
 			defer wg.Done()
 
 			defer func() {

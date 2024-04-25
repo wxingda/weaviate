@@ -248,7 +248,7 @@ func (rii *RemoteIndexIncoming) GetShardStatus(ctx context.Context,
 ) (string, error) {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return "", errors.Errorf("local index %q not found", indexName)
+		return "", errors.Errorf("11 local index %q not found", indexName)
 	}
 
 	return index.IncomingGetShardStatus(ctx, shardName)
@@ -270,7 +270,7 @@ func (rii *RemoteIndexIncoming) FilePutter(ctx context.Context,
 ) (io.WriteCloser, error) {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return nil, errors.Errorf("local index %q not found", indexName)
+		return nil, errors.Errorf("22 local index %q not found", indexName)
 	}
 
 	return index.IncomingFilePutter(ctx, shardName, filePath)
@@ -281,7 +281,7 @@ func (rii *RemoteIndexIncoming) CreateShard(ctx context.Context,
 ) error {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return errors.Errorf("local index %q not found", indexName)
+		return errors.Errorf("33 local index %q not found", indexName)
 	}
 
 	return index.IncomingCreateShard(ctx, indexName, shardName)
@@ -292,7 +292,7 @@ func (rii *RemoteIndexIncoming) ReInitShard(ctx context.Context,
 ) error {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return errors.Errorf("local index %q not found", indexName)
+		return errors.Errorf("44 local index %q not found", indexName)
 	}
 
 	return index.IncomingReinitShard(ctx, shardName)
@@ -303,7 +303,7 @@ func (rii *RemoteIndexIncoming) OverwriteObjects(ctx context.Context,
 ) ([]replica.RepairResponse, error) {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return nil, fmt.Errorf("local index %q not found", indexName)
+		return nil, fmt.Errorf("55 local index %q not found", indexName)
 	}
 
 	return index.IncomingOverwriteObjects(ctx, shardName, vobjects)
@@ -314,7 +314,7 @@ func (rii *RemoteIndexIncoming) DigestObjects(ctx context.Context,
 ) ([]replica.RepairResponse, error) {
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return nil, fmt.Errorf("local index %q not found", indexName)
+		return nil, fmt.Errorf("66 local index %q not found", indexName)
 	}
 
 	return index.IncomingDigestObjects(ctx, shardName, ids)
@@ -325,11 +325,11 @@ func (rii *RemoteIndexIncoming) indexForIncomingWrite(ctx context.Context, index
 ) (RemoteIndexIncomingRepo, error) {
 	// wait for schema and store to reach version >= schemaVersion
 	if _, err := rii.schema.ReadOnlyClassWithVersion(ctx, indexName, schemaVersion); err != nil {
-		return nil, fmt.Errorf("local index %q not found: %w", indexName, err)
+		return nil, fmt.Errorf("77 local index %q not found: %w", indexName, err)
 	}
 	index := rii.repo.GetIndexForIncoming(schema.ClassName(indexName))
 	if index == nil {
-		return nil, fmt.Errorf("local index %q not found", indexName)
+		return nil, fmt.Errorf("88 local index %q not found", indexName)
 	}
 	return index, nil
 }
