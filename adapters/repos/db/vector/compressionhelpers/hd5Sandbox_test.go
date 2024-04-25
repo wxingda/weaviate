@@ -216,9 +216,9 @@ func Test_Encoders(t *testing.T) {
 	mutex := sync.Mutex{}
 	Concurrently(logger, uint64(len(testData)), func(i uint64) {
 		heap := priorityqueue.NewMax[any](k)
-		cq := quantizer.Encode(testData[i])
+		//cq := quantizer.Encode(testData[i])
 		for j := range compressed {
-			d, _ := quantizer.DistanceBetweenCompressedVectors(cq, compressed[j])
+			d, _ := quantizer.DistanceBetweenCompressedAndUncompressedVectors(testData[i], compressed[j])
 			if heap.Len() < k || heap.Top().Dist > d {
 				if heap.Len() == k {
 					heap.Pop()
