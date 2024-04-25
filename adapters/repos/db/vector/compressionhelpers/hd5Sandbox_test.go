@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -203,10 +204,10 @@ func Test_Encoders(t *testing.T) {
 
 	compressed := make([][]byte, len(data))
 
+	logger := logrus.New()
 	distancer := distancer.NewDotProductProvider()
 	quantizer := NewLocallyAdaptiveScalarQuantizer(data, distancer)
 
-	logger := logrus.New()
 	Concurrently(logger, uint64(len(data)), func(i uint64) {
 		compressed[i] = quantizer.Encode(data[i])
 	})
@@ -214,11 +215,20 @@ func Test_Encoders(t *testing.T) {
 
 	var relevant uint64
 	mutex := sync.Mutex{}
+	ellapsed := time.Duration(0)
 	Concurrently(logger, uint64(len(testData)), func(i uint64) {
 		heap := priorityqueue.NewMax[any](k)
+		cd := quantizer.NewDistancer(testData[i])
 		//cq := quantizer.Encode(testData[i])
 		for j := range compressed {
-			d, _ := quantizer.DistanceBetweenCompressedAndUncompressedVectors(testData[i], compressed[j])
+			before := time.Now()
+			d, _, _ := cd.Distance(compressed[j])
+			//d, _ := quantizer.DistanceBetweenCompressedAndUncompressedVectors(testData[i], compressed[j])
+			//d, _, _ := distancer.SingleDist(testData[i], data[j])
+			ell := time.Since(before)
+			mutex.Lock()
+			ellapsed += ell
+			mutex.Unlock()
 			if heap.Len() < k || heap.Top().Dist > d {
 				if heap.Len() == k {
 					heap.Pop()
@@ -237,6 +247,8 @@ func Test_Encoders(t *testing.T) {
 	})
 
 	recall := float32(relevant) / float32(k*len(testData))
+	latency := float32(ellapsed.Milliseconds()) / float32(len(testData))
 	fmt.Println(recall)
+	fmt.Println(latency)
 	assert.NotNil(t, err)
 }

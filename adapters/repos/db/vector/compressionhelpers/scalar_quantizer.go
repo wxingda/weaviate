@@ -270,6 +270,22 @@ func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x
 	return -sum, nil
 }
 
+func dot(x []float32, y []byte) float32 {
+	sum := float32(0)
+	for i := range x {
+		sum += x[i] * float32(y[i])
+	}
+	return sum
+}
+
+func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors2(x []float32, y []byte, xNorm, meanProd float32) (float32, error) {
+	by := lasq.lowerBound(y)
+	ay := (lasq.upperBound(y) - by) / codesLasq
+
+	sum := dot(x, y)
+	return -sum*ay - xNorm*by - meanProd, nil
+}
+
 func (lasq *LaScalarQuantizer) lowerBound(code []byte) float32 {
 	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+2:]))
 }
@@ -280,20 +296,30 @@ func (lasq *LaScalarQuantizer) upperBound(code []byte) float32 {
 
 type LASQDistancer struct {
 	x          []float32
+	norm       float32
+	meanProd   float32
 	sq         *LaScalarQuantizer
 	compressed []byte
 }
 
 func (sq *LaScalarQuantizer) NewDistancer(a []float32) *LASQDistancer {
+	sum := float32(0)
+	meanProd := float32(0)
+	for i, xi := range a {
+		sum += xi
+		meanProd += xi * sq.means[i]
+	}
 	return &LASQDistancer{
 		x:          a,
 		sq:         sq,
+		norm:       sum,
+		meanProd:   meanProd,
 		compressed: sq.Encode(a),
 	}
 }
 
 func (d *LASQDistancer) Distance(x []byte) (float32, bool, error) {
-	dist, err := d.sq.DistanceBetweenCompressedVectors(d.compressed, x)
+	dist, err := d.sq.DistanceBetweenCompressedAndUncompressedVectors2(d.x, x, d.norm, d.meanProd)
 	return dist, err == nil, err
 }
 
