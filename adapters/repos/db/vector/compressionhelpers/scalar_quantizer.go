@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	codes     = 64.0
+	codes     = 255.0
 	codes2    = codes * codes
-	codesLasq = 16.0
+	codesLasq = 255.0
 )
 
 var l2SquaredByteImpl func(a, b []byte) uint32 = func(a, b []byte) uint32 {
@@ -36,11 +36,11 @@ var l2SquaredByteImpl func(a, b []byte) uint32 = func(a, b []byte) uint32 {
 	return sum
 }
 
-var dotByteImpl func(a, b []byte) uint32 = func(a, b []byte) uint32 {
-	var sum uint32
+var dotByteImpl func(a, b []byte) uint64 = func(a, b []byte) uint64 {
+	var sum uint64
 
 	for i := range a {
-		sum += uint32(a[i]) * uint32(b[i])
+		sum += uint64(a[i]) * uint64(b[i])
 	}
 
 	return sum
@@ -107,7 +107,7 @@ func codeFor(x, a, b, codes float32) byte {
 	} else if x-b > a {
 		return byte(codes)
 	} else {
-		return byte((x - b) * codes / a)
+		return byte(math.Floor(float64((x - b) * codes / a)))
 	}
 }
 
@@ -195,7 +195,7 @@ func NewLocallyAdaptiveScalarQuantizer(data [][]float32, distance distancer.Prov
 		}
 	}
 	for i := range data[0] {
-		means[i] /= float32(dims)
+		means[i] /= float32(len(data))
 	}
 	return &LaScalarQuantizer{
 		distancer: distance,
@@ -231,32 +231,51 @@ func (lasq *LaScalarQuantizer) Encode(vec []float32) []byte {
 	return code
 }
 
+func (lasq *LaScalarQuantizer) Decode(x []byte) []float32 {
+	bx := lasq.lowerBound(x)
+	ax := (lasq.upperBound(x) - bx) / codesLasq
+	correctedX := make([]float32, lasq.dims)
+	for i := 0; i < lasq.dims; i++ {
+		correctedX[i] = float32(x[i])*ax + bx + lasq.means[i]
+	}
+	return correctedX
+}
+
+func (lasq *LaScalarQuantizer) decodeOne(x byte, lower, correctedRange, mean float32) float32 {
+	return float32(x)*correctedRange + lower + mean
+}
+
 func (lasq *LaScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (float32, error) {
 	if len(x) != len(y) {
 		return 0, errors.Errorf("vector lengths don't match: %d vs %d",
 			len(x), len(y))
 	}
-
 	bx := lasq.lowerBound(x)
 	ax := (lasq.upperBound(x) - bx) / codesLasq
-	by := lasq.lowerBound(y)
-	ay := (lasq.upperBound(y) - by) / codesLasq
 	correctedX := make([]float32, lasq.dims)
-	correctedY := make([]float32, lasq.dims)
 	for i := 0; i < lasq.dims; i++ {
 		correctedX[i] = float32(x[i])*ax + bx + lasq.means[i]
-		correctedY[i] = float32(y[i])*ay + by + lasq.means[i]
 	}
-	d, _, err := lasq.distancer.SingleDist(correctedX, correctedY)
-	return d, err
+	return lasq.DistanceBetweenCompressedAndUncompressedVectors(correctedX, y)
+}
+
+func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x []float32, y []byte) (float32, error) {
+	by := lasq.lowerBound(y)
+	ay := (lasq.upperBound(y) - by) / codesLasq
+
+	sum := float32(0)
+	for i := range x {
+		sum += x[i] * (float32(y[i])*ay + by + lasq.means[i])
+	}
+	return -sum, nil
 }
 
 func (lasq *LaScalarQuantizer) lowerBound(code []byte) float32 {
-	return math.Float32frombits(binary.BigEndian.Uint32(code[len(code)-8:]))
+	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+2:]))
 }
 
 func (lasq *LaScalarQuantizer) upperBound(code []byte) float32 {
-	return math.Float32frombits(binary.BigEndian.Uint32(code[len(code)-4:]))
+	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+6:]))
 }
 
 type LASQDistancer struct {
@@ -313,6 +332,60 @@ func (sq *LaScalarQuantizer) ExposeFields() PQData {
 	return PQData{}
 }
 
-func (sq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x []float32, encoded []byte) (float32, error) {
-	return sq.DistanceBetweenCompressedVectors(sq.Encode(x), encoded)
+type TScalarQuantizer struct {
+	distancer distancer.Provider
+	dims      int
+	tiles     []*TileEncoder
+}
+
+func NewTilesScalarQuantizer(data [][]float32, distance distancer.Provider) *TScalarQuantizer {
+	dims := len(data[0])
+
+	quantizer := &TScalarQuantizer{
+		distancer: distance,
+		dims:      dims,
+		tiles:     nil,
+	}
+
+	for i := 0; i < dims; i++ {
+		quantizer.tiles = append(quantizer.tiles, NewTileEncoder(8, i, NormalEncoderDistribution))
+	}
+	for _, d := range data {
+		for i := 0; i < dims; i++ {
+			quantizer.tiles[i].Add(d)
+		}
+	}
+	for i := 0; i < dims; i++ {
+		quantizer.tiles[i].Fit(nil)
+	}
+
+	return quantizer
+}
+
+func (sq *TScalarQuantizer) Encode(x []float32) []byte {
+	res := make([]byte, len(x))
+	for i := 0; i < sq.dims; i++ {
+		res[i] = sq.tiles[i].Encode(x)
+	}
+	return res
+}
+
+func (sq *TScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (float32, error) {
+	decX := make([]float32, len(x))
+	decY := make([]float32, len(y))
+	for i := 0; i < sq.dims; i++ {
+		decX[i] = sq.tiles[i].Centroid(x[i])[0]
+		decY[i] = sq.tiles[i].Centroid(y[i])[0]
+	}
+	res, _, err := sq.distancer.SingleDist(decX, decY)
+	return res, err
+}
+
+func (sq *TScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x []float32, y []byte) (float32, error) {
+	decY := make([]float32, len(y))
+	for i := 0; i < sq.dims; i++ {
+		decY[i] = sq.tiles[i].Centroid(y[i])[0]
+	}
+	res, _, err := sq.distancer.SingleDist(x, decY)
+	return res, err
 }
