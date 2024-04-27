@@ -36,13 +36,21 @@ var l2SquaredByteImpl func(a, b []byte) uint32 = func(a, b []byte) uint32 {
 	return sum
 }
 
-var dotByteImpl func(a, b []byte) uint64 = func(a, b []byte) uint64 {
-	var sum uint64
+var dotByteImpl func(a, b []byte) float32 = func(a, b []byte) float32 {
+	var sum float32
 
 	for i := range a {
-		sum += uint64(a[i]) * uint64(b[i])
+		sum += float32(a[i]) * float32(b[i])
 	}
 
+	return sum
+}
+
+var LAQDotImpl func(x []float32, y []byte) float32 = func(x []float32, y []byte) float32 {
+	sum := float32(0)
+	for i := range x {
+		sum += x[i] * float32(y[i])
+	}
 	return sum
 }
 
@@ -112,18 +120,14 @@ func codeFor(x, a, b, codes float32) byte {
 }
 
 func (sq *ScalarQuantizer) Encode(vec []float32) []byte {
-	var sum uint16 = 0
-	code := make([]byte, len(vec)+2)
+	var sum uint32 = 0
+	code := make([]byte, len(vec)+4)
 	for i := 0; i < len(vec); i++ {
 		code[i] = codeFor(vec[i], sq.a, sq.b, codes)
-		sum += uint16(code[i])
+		sum += uint32(code[i])
 	}
-	binary.BigEndian.PutUint16(code[len(vec):], sum)
+	binary.BigEndian.PutUint32(code[len(vec):], sum)
 	return code
-}
-
-func (sq *ScalarQuantizer) norm(code []byte) uint16 {
-	return binary.BigEndian.Uint16(code[len(code)-2:])
 }
 
 type SQDistancer struct {
@@ -180,15 +184,21 @@ func (sq *ScalarQuantizer) ExposeFields() PQData {
 	return PQData{}
 }
 
+func (sq *ScalarQuantizer) norm(code []byte) uint32 {
+	return binary.BigEndian.Uint32(code[len(code)-2:])
+}
+
 type LaScalarQuantizer struct {
 	distancer distancer.Provider
 	dims      int
 	means     []float32
+	meansAcc  float32
 }
 
 func NewLocallyAdaptiveScalarQuantizer(data [][]float32, distance distancer.Provider) *LaScalarQuantizer {
 	dims := len(data[0])
 	means := make([]float32, dims)
+	meansAcc := float32(0)
 	for _, v := range data {
 		for i := range v {
 			means[i] += v[i]
@@ -196,16 +206,17 @@ func NewLocallyAdaptiveScalarQuantizer(data [][]float32, distance distancer.Prov
 	}
 	for i := range data[0] {
 		means[i] /= float32(len(data))
+		meansAcc += means[i]
 	}
 	return &LaScalarQuantizer{
 		distancer: distance,
 		dims:      dims,
 		means:     means,
+		meansAcc:  meansAcc,
 	}
 }
 
 func (lasq *LaScalarQuantizer) Encode(vec []float32) []byte {
-	var sum uint16 = 0
 	min, max := float32(math.MaxFloat32), float32(-math.MaxFloat32)
 	for i, x := range vec {
 		corrected := x - lasq.means[i]
@@ -216,18 +227,16 @@ func (lasq *LaScalarQuantizer) Encode(vec []float32) []byte {
 			max = corrected
 		}
 	}
-	code := make([]byte, len(vec)+10)
+	code := make([]byte, len(vec)+12)
 
+	var sum uint32 = 0
 	for i := 0; i < len(vec); i++ {
-		for i := 0; i < len(vec); i++ {
-			code[i] = codeFor(vec[i]-lasq.means[i], max-min, min, codesLasq)
-			sum += uint16(code[i])
-		}
-		binary.BigEndian.PutUint16(code[len(vec):], sum)
-		binary.BigEndian.PutUint32(code[len(vec)+2:], math.Float32bits(min))
-		binary.BigEndian.PutUint32(code[len(vec)+6:], math.Float32bits(max))
+		code[i] = codeFor(vec[i]-lasq.means[i], max-min, min, codesLasq)
+		sum += uint32(code[i])
 	}
-	binary.BigEndian.PutUint16(code[len(vec):], sum)
+	binary.BigEndian.PutUint32(code[len(vec):], sum)
+	binary.BigEndian.PutUint32(code[len(vec)+4:], math.Float32bits(min))
+	binary.BigEndian.PutUint32(code[len(vec)+8:], math.Float32bits(max))
 	return code
 }
 
@@ -250,13 +259,17 @@ func (lasq *LaScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (fl
 		return 0, errors.Errorf("vector lengths don't match: %d vs %d",
 			len(x), len(y))
 	}
+
 	bx := lasq.lowerBound(x)
 	ax := (lasq.upperBound(x) - bx) / codesLasq
-	correctedX := make([]float32, lasq.dims)
-	for i := 0; i < lasq.dims; i++ {
-		correctedX[i] = float32(x[i])*ax + bx + lasq.means[i]
-	}
-	return lasq.DistanceBetweenCompressedAndUncompressedVectors(correctedX, y)
+	by := lasq.lowerBound(y)
+	ay := (lasq.upperBound(y) - by) / codesLasq
+	xNorm := float32(lasq.norm(x))
+	yNorm := float32(lasq.norm(y))
+	x = x[:lasq.dims]
+	y = y[:lasq.dims]
+	sum := ax*ay*dotByteImpl(x, y) + ax*by*xNorm + ay*bx*yNorm + ax*LAQDotImpl(lasq.means, x) + ay*LAQDotImpl(lasq.means, y) + (bx+by)*lasq.meansAcc + float32(len(x))*bx*by
+	return -sum, nil
 }
 
 func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x []float32, y []byte) (float32, error) {
@@ -270,28 +283,24 @@ func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x
 	return -sum, nil
 }
 
-func dot(x []float32, y []byte) float32 {
-	sum := float32(0)
-	for i := range x {
-		sum += x[i] * float32(y[i])
-	}
-	return sum
-}
-
 func (lasq *LaScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors2(x []float32, y []byte, xNorm, meanProd float32) (float32, error) {
 	by := lasq.lowerBound(y)
 	ay := (lasq.upperBound(y) - by) / codesLasq
 
-	sum := dot(x, y)
+	sum := LAQDotImpl(x, y)
 	return -sum*ay - xNorm*by - meanProd, nil
 }
 
 func (lasq *LaScalarQuantizer) lowerBound(code []byte) float32 {
-	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+2:]))
+	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+4:]))
 }
 
 func (lasq *LaScalarQuantizer) upperBound(code []byte) float32 {
-	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+6:]))
+	return math.Float32frombits(binary.BigEndian.Uint32(code[lasq.dims+8:]))
+}
+
+func (lasq *LaScalarQuantizer) norm(code []byte) uint32 {
+	return binary.BigEndian.Uint32(code[lasq.dims:])
 }
 
 type LASQDistancer struct {
