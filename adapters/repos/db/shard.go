@@ -1055,6 +1055,16 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		return errors.Wrap(err, "close prop length tracker")
 	}
 
+	// unregister all callbacks at once, in parallel
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+		s.cycleCallbacks.compactionCallbacksCtrl,
+		s.cycleCallbacks.flushCallbacksCtrl,
+		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
+		s.cycleCallbacks.geoPropsCombinedCallbacksCtrl,
+	).Unregister(ctx); err != nil {
+		return err
+	}
+
 	if s.hasTargetVectors() {
 		// TODO run in parallel?
 		for targetVector, queue := range s.queues {
@@ -1085,16 +1095,6 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		if err = s.vectorIndex.Shutdown(ctx); err != nil {
 			return errors.Wrap(err, "shut down vector index")
 		}
-	}
-
-	// unregister all callbacks at once, in parallel
-	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
-		s.cycleCallbacks.compactionCallbacksCtrl,
-		s.cycleCallbacks.flushCallbacksCtrl,
-		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
-		s.cycleCallbacks.geoPropsCombinedCallbacksCtrl,
-	).Unregister(ctx); err != nil {
-		return err
 	}
 
 	if err = s.store.Shutdown(ctx); err != nil {

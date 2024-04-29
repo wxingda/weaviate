@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -110,6 +111,16 @@ func (c *RemoteIndex) BatchPutObjects(ctx context.Context, host, index,
 		resp = clusterapi.IndicesPayloads.ErrorList.Unmarshal(data)
 		return nil
 	}
+
+	fmt.Printf("  ==> [%s] BatchPutObjects start [%s]\n", shard, time.Now())
+	defer func() {
+		if err != nil {
+			for _, o := range objs {
+				fmt.Printf("  ==> [%s] BatchPutObjects obj %+v\n", shard, o.Object)
+			}
+		}
+		fmt.Printf("  ==> [%s] BatchPutObjects end [%s]\n", shard, time.Now())
+	}()
 
 	if err = c.doWithCustomMarshaller(c.timeoutUnit*30, req, body, decode, successCode); err != nil {
 		return duplicateErr(err, len(objs))

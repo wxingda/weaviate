@@ -38,6 +38,11 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		return []error{storagestate.ErrStatusReadOnly}
 	}
 
+	fmt.Printf("  ==> [%s] PutObjectBatch start [%s]\n", s.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s] PutObjectBatch end [%s]\n", s.name, time.Now())
+	}()
+
 	err := func() error {
 		s.shutdownLock.RLock()
 		defer s.shutdownLock.RUnlock()
@@ -58,6 +63,8 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		fmt.Printf("  ==> [%s] PutObjectBatch: decrement\n", s.name)
 		defer s.inUseCounter.Add(-1)
 	}
+
+	fmt.Printf("  ==> [%s] PutObjectBatch locked [%s]\n", s.name, time.Now())
 
 	return s.putBatch(ctx, objects)
 }
