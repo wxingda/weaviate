@@ -623,7 +623,7 @@ func (s *Shard) drop() (err error) {
 		s.clearDimensionMetrics()
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.TODO(), 20*time.Second)
 	defer cancel()
 
 	// unregister all callbacks at once, in parallel
@@ -976,10 +976,12 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		defer s.shutdownLock.Unlock()
 
 		if s.shut {
+			fmt.Printf("  ==> [%s] Shutdown: already shut\n", s.name)
 			return false, fmt.Errorf("already shut or ongoing shutdown")
 		}
 
 		if s.inUseCounter.Load() == 0 {
+			fmt.Printf("  ==> [%s] Shutdown: shutting down\n", s.name)
 			s.shut = true
 			return true, nil
 		}
@@ -988,6 +990,7 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 
 	var shut bool
 	if shut, err = shutdownCheck(); err != nil {
+		fmt.Printf("  ==> [%s] Shutdown: error %q\n", s.name, err)
 		return
 	}
 	if !shut {
@@ -995,16 +998,21 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
 
+			i := 0
 			for {
 				select {
 				case <-ctx.Done():
+					fmt.Printf("  ==> [%s] Shutdown: loop [%d] timeout %q\n", s.name, i, ctx.Err())
 					return ctx.Err()
 				case <-ticker.C:
-					if shut, err = shutdownCheck(); err != nil {
+					if shut, err := shutdownCheck(); err != nil {
+						fmt.Printf("  ==> [%s] Shutdown: loop [%d] err %q\n", s.name, i, err)
 						return err
 					} else if shut {
+						fmt.Printf("  ==> [%s] Shutdown: loop [%d] ok\n", s.name, i)
 						return nil
 					}
+					i++
 				}
 			}
 		}(); err != nil {

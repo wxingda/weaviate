@@ -43,9 +43,11 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		defer s.shutdownLock.RUnlock()
 
 		if s.shut {
+			fmt.Printf("  ==> [%s] PutObjectBatch: already shut\n", s.name)
 			return fmt.Errorf("already shut or dropped")
 		}
 
+		fmt.Printf("  ==> [%s] PutObjectBatch: increment\n", s.name)
 		s.inUseCounter.Add(1)
 		return nil
 	}()
@@ -53,6 +55,7 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 	if err != nil {
 		return []error{err}
 	} else {
+		fmt.Printf("  ==> [%s] PutObjectBatch: decrement\n", s.name)
 		defer s.inUseCounter.Add(-1)
 	}
 
