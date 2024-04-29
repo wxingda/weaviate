@@ -210,6 +210,7 @@ type Shard struct {
 
 	activityTracker atomic.Int32
 	shut         bool
+	inUseCounter atomic.Int64
 	shutdownLock *sync.RWMutex
 }
 
@@ -610,15 +611,6 @@ func (s *Shard) initLSMStore(ctx context.Context) error {
 // from shard directory, it needs to be reflected as well in LazyLoadShard::drop()
 // method to keep drop behaviour consistent.
 func (s *Shard) drop() (err error) {
-	s.shutdownLock.Lock()
-	defer s.shutdownLock.Unlock()
-
-	defer func() {
-		if err == nil {
-			s.shut = true
-		}
-	}()
-
 	s.metrics.DeleteShardLabels(s.index.Config.ClassName.String(), s.name)
 	s.metrics.baseMetrics.StartUnloadingShard(s.index.Config.ClassName.String())
 	s.replicationMap.clear()
@@ -955,31 +947,95 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 	return err
 }
 
-func (s *Shard) Shutdown(ctx context.Context) (err error) {
-	if !s.shutdownLock.TryLock() {
-		t := time.NewTicker(50 * time.Millisecond)
-		defer t.Stop()
+/*
 
-		for {
-			select {
-			case <-t.C:
-				if s.shutdownLock.TryLock() {
-					break
+	batch
+		shut
+		false
+			in_use ++
+			defer in_use --
+		true
+			fail request
+
+
+
+	shutdown
+		loop + time:
+		if shut == true
+			fail request
+		in_use == 0 && shut == false
+			shut = true
+
+
+
+*/
+
+func (s *Shard) Shutdown(ctx context.Context) (err error) {
+	shutdownCheck := func() (bool, error) {
+		s.shutdownLock.Lock()
+		defer s.shutdownLock.Unlock()
+
+		if s.shut {
+			return false, fmt.Errorf("already shut or ongoing shutdown")
+		}
+
+		if s.inUseCounter.Load() == 0 {
+			s.shut = true
+			return true, nil
+		}
+		return false, nil
+	}
+
+	var shut bool
+	if shut, err = shutdownCheck(); err != nil {
+		return
+	}
+	if !shut {
+		if err = func() error {
+			ticker := time.NewTicker(50 * time.Millisecond)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+					if shut, err = shutdownCheck(); err != nil {
+						return err
+					} else if shut {
+						return nil
+					}
 				}
-			case <-ctx.Done():
-				return ctx.Err()
 			}
+		}(); err != nil {
+			return
 		}
 	}
 
-	// s.shutdownLock.Lock()
-	defer s.shutdownLock.Unlock()
+	// if !s.shutdownLock.TryLock() {
+	// 	t := time.NewTicker(50 * time.Millisecond)
+	// 	defer t.Stop()
 
-	defer func() {
-		if err == nil {
-			s.shut = true
-		}
-	}()
+	// 	for {
+	// 		select {
+	// 		case <-t.C:
+	// 			if s.shutdownLock.TryLock() {
+	// 				break
+	// 			}
+	// 		case <-ctx.Done():
+	// 			return ctx.Err()
+	// 		}
+	// 	}
+	// }
+
+	// // s.shutdownLock.Lock()
+	// defer s.shutdownLock.Unlock()
+
+	// defer func() {
+	// 	if err == nil {
+	// 		s.shut = true
+	// 	}
+	// }()
 
 	if s.index.Config.TrackVectorDimensions {
 		// tracking vector dimensions goroutine only works when tracking is enabled
