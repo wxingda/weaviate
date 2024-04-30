@@ -350,16 +350,29 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 				fmt.Printf("  ==> [%s] UpdateTenants COLD start\n", name)
 				defer fmt.Printf("  ==> [%s] UpdateTenants COLD end\n", name)
 
+				shard := func() ShardLike {
+					idx.shardLocks.Lock(name)
+					defer idx.shardLocks.Unlock(name)
+
+					fmt.Printf("  ==> [%s] UpdateTenants COLD load\n", name)
+					return idx.shards.Load(name)
+				}()
+
+				if shard == nil {
+					fmt.Printf("  ==> [%s] UpdateTenants COLD return\n", name)
+					return nil // shard already does not exist or inactive
+				}
+
 				idx.shardCreateLocks.Lock(name)
 				defer idx.shardCreateLocks.Unlock(name)
 
 				fmt.Printf("  ==> [%s] UpdateTenants COLD load and delete\n", name)
-				shard, ok := idx.shards.LoadAndDelete(name) // then remove entry
+				idx.shards.LoadAndDelete(name) // then remove entry
 
-				if !ok {
-					fmt.Printf("  ==> [%s] UpdateTenants COLD return\n", name)
-					return nil // shard already does not exist or inactive
-				}
+				// if !ok {
+				// 	fmt.Printf("  ==> [%s] UpdateTenants COLD return\n", name)
+				// 	return nil // shard already does not exist or inactive
+				// }
 
 				fmt.Printf("  ==> [%s] UpdateTenants COLD shutdown start\n", name)
 				if err := shard.Shutdown(ctx); err != nil {
