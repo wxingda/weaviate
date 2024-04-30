@@ -846,8 +846,22 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 					replica.ConsistencyLevel(replProps.ConsistencyLevel), schemaVersion)
 			} else if shard := i.localShard(shardName); shard != nil {
 				i.backupMutex.RLockGuard(func() error {
-					fmt.Printf("  ==> [%s] putObjectBatch start\n", shard.Name())
-					defer fmt.Printf("  ==> [%s] putObjectBatch end\n", shard.Name())
+					fmt.Printf("  ==> [%s] putObjectBatch local start [%s]\n", shardName, time.Now())
+					defer func() {
+						fmt.Printf("  ==> [%s] putObjectBatch local end [%s]\n", shardName, time.Now())
+					}()
+
+					release, err := shard.preventShutdown()
+					if err != nil {
+						errs = []error{err}
+						return nil
+					}
+					defer release()
+
+					fmt.Printf("  ==> [%s] putObjectBatch local locked [%s]\n", shardName, time.Now())
+
+					// fmt.Printf("  ==> [%s] putObjectBatch start\n", shard.Name())
+					// defer fmt.Printf("  ==> [%s] putObjectBatch end\n", shard.Name())
 
 					errs = shard.PutObjectBatch(ctx, group.objects)
 					return nil
@@ -883,14 +897,6 @@ func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 	i.backupMutex.RLock()
 	defer i.backupMutex.RUnlock()
 
-	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard before\n", shardName)
-	shard, err := i.getOrInitLocalShard(ctx, shardName)
-	if err != nil {
-		fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard err\n", shardName)
-		return duplicateErr(ErrShardNotFound, len(objects))
-	}
-	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard end\n", shardName)
-
 	// This is a bit hacky, the problem here is that storobj.Parse() currently
 	// misses date fields as it has no way of knowing that a date-formatted
 	// string was actually a date type. However, adding this functionality to
@@ -903,6 +909,27 @@ func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 			return duplicateErr(err, len(objects))
 		}
 	}
+
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard before [%s]\n", shardName, time.Now())
+	shard, err := i.getOrInitLocalShard(ctx, shardName)
+	if err != nil {
+		fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard err [%s]\n", shardName, time.Now())
+		return duplicateErr(ErrShardNotFound, len(objects))
+	}
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShard end [%s]\n", shardName, time.Now())
+
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects start [%s]\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s] IncomingBatchPutObjects end [%s]\n", shardName, time.Now())
+	}()
+
+	release, err := shard.preventShutdown()
+	if err != nil {
+		return []error{err}
+	}
+	defer release()
+
+	fmt.Printf("  ==> [%s] IncomingBatchPutObjects locked [%s]\n", shardName, time.Now())
 
 	return shard.PutObjectBatch(ctx, objects)
 }

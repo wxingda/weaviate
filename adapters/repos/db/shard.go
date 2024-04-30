@@ -107,6 +107,8 @@ type ShardLike interface {
 	Queue() *IndexQueue
 	Queues() map[string]*IndexQueue
 	Shutdown(context.Context) error // Shutdown the shard
+	preventShutdown() (release func(), err error)
+
 	// TODO tests only
 	ObjectList(ctx context.Context, limit int, sort []filters.Sort, cursor *filters.Cursor,
 		additional additional.Properties, className schema.ClassName) ([]*storobj.Object, error) // Search and return objects

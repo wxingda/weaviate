@@ -353,12 +353,10 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 				idx.shardCreateLocks.Lock(name)
 				defer idx.shardCreateLocks.Unlock(name)
 
-				fmt.Printf("  ==> [%s] UpdateTenants COLD swap\n", name)
-				shard, ok := idx.shards.Swap(name, nil) // swap shard for nil
 				fmt.Printf("  ==> [%s] UpdateTenants COLD load and delete\n", name)
-				idx.shards.LoadAndDelete(name) // then remove entry
+				shard, ok := idx.shards.LoadAndDelete(name) // then remove entry
 
-				if !ok || shard == nil {
+				if !ok {
 					fmt.Printf("  ==> [%s] UpdateTenants COLD return\n", name)
 					return nil // shard already does not exist or inactive
 				}

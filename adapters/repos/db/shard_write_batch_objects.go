@@ -38,36 +38,41 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		return []error{storagestate.ErrStatusReadOnly}
 	}
 
-	fmt.Printf("  ==> [%s] PutObjectBatch start [%s]\n", s.name, time.Now())
-	defer func() {
-		fmt.Printf("  ==> [%s] PutObjectBatch end [%s]\n", s.name, time.Now())
-	}()
+	// fmt.Printf("  ==> [%s] PutObjectBatch start [%s]\n", s.name, time.Now())
+	// defer func() {
+	// 	fmt.Printf("  ==> [%s] PutObjectBatch end [%s]\n", s.name, time.Now())
+	// }()
 
-	release, err := s.preventShutdown()
-	if err != nil {
-		return []error{err}
-	}
-	defer release()
+	// release, err := s.preventShutdown()
+	// if err != nil {
+	// 	return []error{err}
+	// }
+	// defer release()
 
-	fmt.Printf("  ==> [%s] PutObjectBatch locked [%s]\n", s.name, time.Now())
+	// fmt.Printf("  ==> [%s] PutObjectBatch locked [%s]\n", s.name, time.Now())
 
 	return s.putBatch(ctx, objects)
 }
 
 func (s *Shard) preventShutdown() (release func(), err error) {
+	fmt.Printf("  ==> [%s] preventShutdown: start [%s]\n", s.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s] preventShutdown: end [%s]\n", s.name, time.Now())
+	}()
+
 	s.shutdownLock.RLock()
 	defer s.shutdownLock.RUnlock()
 
 	if s.shut {
-		fmt.Printf("  ==> [%s] PutObjectBatch: already shut\n", s.name)
-		return func() {}, fmt.Errorf("already shut or dropped")
+		fmt.Printf("  ==> [%s] preventShutdown: already shut [%s]\n", s.name, time.Now())
+		return func() {}, fmt.Errorf("already shut or dropped %q", s.name)
 	}
 
-	fmt.Printf("  ==> [%s] PutObjectBatch: increment\n", s.name)
+	fmt.Printf("  ==> [%s] preventShutdown: increment [%s]\n", s.name, time.Now())
 	s.inUseCounter.Add(1)
 
 	return func() {
-		fmt.Printf("  ==> [%s] PutObjectBatch: decrement\n", s.name)
+		fmt.Printf("  ==> [%s] preventShutdown: decrement [%s]\n", s.name, time.Now())
 		s.inUseCounter.Add(-1)
 	}, nil
 }

@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -417,6 +418,18 @@ func (l *LazyLoadShard) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return l.shard.Shutdown(ctx)
+}
+
+func (l *LazyLoadShard) preventShutdown() (release func(), err error) {
+	fmt.Printf("  ==> [%s] preventShutdown: lazy start [%s]\n", l.shardOpts.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s] preventShutdown: lazy end [%s]\n", l.shardOpts.name, time.Now())
+	}()
+
+	if err := l.Load(context.Background()); err != nil {
+		return nil, err
+	}
+	return l.shard.preventShutdown()
 }
 
 func (l *LazyLoadShard) ObjectList(ctx context.Context, limit int, sort []filters.Sort, cursor *filters.Cursor, additional additional.Properties, className schema.ClassName) ([]*storobj.Object, error) {
