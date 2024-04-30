@@ -43,30 +43,33 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 		fmt.Printf("  ==> [%s] PutObjectBatch end [%s]\n", s.name, time.Now())
 	}()
 
-	err := func() error {
-		s.shutdownLock.RLock()
-		defer s.shutdownLock.RUnlock()
-
-		if s.shut {
-			fmt.Printf("  ==> [%s] PutObjectBatch: already shut\n", s.name)
-			return fmt.Errorf("already shut or dropped")
-		}
-
-		fmt.Printf("  ==> [%s] PutObjectBatch: increment\n", s.name)
-		s.inUseCounter.Add(1)
-		return nil
-	}()
-
+	release, err := s.preventShutdown()
 	if err != nil {
 		return []error{err}
-	} else {
-		fmt.Printf("  ==> [%s] PutObjectBatch: decrement\n", s.name)
-		defer s.inUseCounter.Add(-1)
 	}
+	defer release()
 
 	fmt.Printf("  ==> [%s] PutObjectBatch locked [%s]\n", s.name, time.Now())
 
 	return s.putBatch(ctx, objects)
+}
+
+func (s *Shard) preventShutdown() (release func(), err error) {
+	s.shutdownLock.RLock()
+	defer s.shutdownLock.RUnlock()
+
+	if s.shut {
+		fmt.Printf("  ==> [%s] PutObjectBatch: already shut\n", s.name)
+		return func() {}, fmt.Errorf("already shut or dropped")
+	}
+
+	fmt.Printf("  ==> [%s] PutObjectBatch: increment\n", s.name)
+	s.inUseCounter.Add(1)
+
+	return func() {
+		fmt.Printf("  ==> [%s] PutObjectBatch: decrement\n", s.name)
+		s.inUseCounter.Add(-1)
+	}, nil
 }
 
 // asyncEnabled is a quick and dirty way to create a feature flag for async
