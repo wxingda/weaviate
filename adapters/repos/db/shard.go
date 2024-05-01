@@ -1017,6 +1017,11 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 */
 
 func (s *Shard) Shutdown(ctx context.Context) (err error) {
+	fmt.Printf("  ==> [%s][%s] Shutdown: start\n", s.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] Shutdown: end\n", s.name, time.Now())
+	}()
+
 	shutdownCheck := func() (bool, error) {
 		s.shutdownLock.Lock()
 		defer s.shutdownLock.Unlock()
@@ -1066,6 +1071,8 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		}
 	}
 
+	fmt.Printf("  ==> [%s][%s] Shutdown: locked\n", s.name, time.Now())
+
 	// if !s.shutdownLock.TryLock() {
 	// 	t := time.NewTicker(50 * time.Millisecond)
 	// 	defer t.Stop()
@@ -1097,9 +1104,13 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		s.stopMetrics <- struct{}{}
 	}
 
+	fmt.Printf("  ==> [%s][%s] Shutdown: dim metrics\n", s.name, time.Now())
+
 	if err = s.GetPropertyLengthTracker().Close(); err != nil {
 		return errors.Wrap(err, "close prop length tracker")
 	}
+
+	fmt.Printf("  ==> [%s][%s] Shutdown: plt close\n", s.name, time.Now())
 
 	// unregister all callbacks at once, in parallel
 	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
@@ -1111,6 +1122,8 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		return err
 	}
 
+	fmt.Printf("  ==> [%s][%s] Shutdown: cm unregister\n", s.name, time.Now())
+
 	if s.hasTargetVectors() {
 		// TODO run in parallel?
 		for targetVector, queue := range s.queues {
@@ -1118,6 +1131,9 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 				return fmt.Errorf("shut down vector index queue of vector %q: %w", targetVector, err)
 			}
 		}
+
+		fmt.Printf("  ==> [%s][%s] Shutdown: queue close\n", s.name, time.Now())
+
 		for targetVector, vectorIndex := range s.vectorIndexes {
 			if err = vectorIndex.Flush(); err != nil {
 				return fmt.Errorf("flush vector index commitlog of vector %q: %w", targetVector, err)
@@ -1126,10 +1142,16 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 				return fmt.Errorf("shut down vector index of vector %q: %w", targetVector, err)
 			}
 		}
+
+		fmt.Printf("  ==> [%s][%s] Shutdown: vector index shutdown\n", s.name, time.Now())
+
 	} else {
 		if err = s.queue.Close(); err != nil {
 			return errors.Wrap(err, "shut down vector index queue")
 		}
+
+		fmt.Printf("  ==> [%s][%s] Shutdown: legacy queue close\n", s.name, time.Now())
+
 		// to ensure that all commitlog entries are written to disk.
 		// otherwise in some cases the tombstone cleanup process'
 		// 'RemoveTombstone' entry is not picked up on restarts
@@ -1141,11 +1163,16 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		if err = s.vectorIndex.Shutdown(ctx); err != nil {
 			return errors.Wrap(err, "shut down vector index")
 		}
+
+		fmt.Printf("  ==> [%s][%s] Shutdown: legacy vector index shutdown\n", s.name, time.Now())
+
 	}
 
 	if err = s.store.Shutdown(ctx); err != nil {
 		return errors.Wrap(err, "stop lsmkv store")
 	}
+
+	fmt.Printf("  ==> [%s][%s] Shutdown: store shutdown\n", s.name, time.Now())
 
 	return nil
 }
