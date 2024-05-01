@@ -530,17 +530,29 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 }
 
 func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
+	fmt.Printf("  ==> [%s][%s] initNonVector: start\n", s.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] initNonVector: end\n", s.name, time.Now())
+	}()
+
 	err := s.initLSMStore(ctx)
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: shard db", s.ID())
 	}
+
+	fmt.Printf("  ==> [%s][%s] initNonVector: initLSMStore\n", s.name, time.Now())
 
 	counter, err := indexcounter.New(s.path())
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: index counter", s.ID())
 	}
 	s.counter = counter
+
+	fmt.Printf("  ==> [%s][%s] initNonVector: indexcounter.New\n", s.name, time.Now())
+
 	s.bitmapFactory = roaringset.NewBitmapFactory(s.counter.Get, s.index.logger)
+
+	fmt.Printf("  ==> [%s][%s] initNonVector: NewBitmapFactory\n", s.name, time.Now())
 
 	dataPresent := s.counter.PreviewNext() != 0
 	versionPath := path.Join(s.path(), "version")
@@ -550,6 +562,8 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 	}
 	s.versioner = versioner
 
+	fmt.Printf("  ==> [%s][%s] initNonVector: newShardVersioner\n", s.name, time.Now())
+
 	plPath := path.Join(s.path(), "proplengths")
 	tracker, err := inverted.NewJsonPropertyLengthTracker(plPath, s.index.logger)
 	if err != nil {
@@ -557,6 +571,7 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 	}
 
 	s.propLenTracker = tracker
+	fmt.Printf("  ==> [%s][%s] initNonVector: NewJsonPropertyLengthTracker\n", s.name, time.Now())
 
 	if err := s.initProperties(class); err != nil {
 		return errors.Wrapf(err, "init shard %q: init per property indices", s.ID())

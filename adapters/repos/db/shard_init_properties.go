@@ -13,6 +13,8 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
@@ -22,6 +24,11 @@ import (
 )
 
 func (s *Shard) initProperties(class *models.Class) error {
+	fmt.Printf("  ==> [%s][%s] initProperties: start\n", s.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] initProperties: end\n", s.name, time.Now())
+	}()
+
 	s.propertyIndices = propertyspecific.Indices{}
 	if class == nil {
 		return nil
@@ -30,10 +37,13 @@ func (s *Shard) initProperties(class *models.Class) error {
 	eg := enterrors.NewErrorGroupWrapper(s.index.logger)
 	s.createPropertyIndex(context.Background(), eg, class.Properties...)
 
+	fmt.Printf("  ==> [%s][%s] initProperties: createPropertyIndex\n", s.name, time.Now())
+
 	eg.Go(func() error {
 		if err := s.addIDProperty(context.TODO()); err != nil {
 			return errors.Wrap(err, "create id property index")
 		}
+		fmt.Printf("  ==> [%s][%s] initProperties: addIDProperty\n", s.name, time.Now())
 		return nil
 	})
 
@@ -42,6 +52,7 @@ func (s *Shard) initProperties(class *models.Class) error {
 			if err := s.addTimestampProperties(context.TODO()); err != nil {
 				return errors.Wrap(err, "create timestamp properties indexes")
 			}
+			fmt.Printf("  ==> [%s][%s] initProperties: addTimestampProperties\n", s.name, time.Now())
 			return nil
 		})
 	}
@@ -51,6 +62,7 @@ func (s *Shard) initProperties(class *models.Class) error {
 			if err := s.addDimensionsProperty(context.TODO()); err != nil {
 				return errors.Wrap(err, "crreate dimensions property index")
 			}
+			fmt.Printf("  ==> [%s][%s] initProperties: addDimensionsProperty\n", s.name, time.Now())
 			return nil
 		})
 	}
