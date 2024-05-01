@@ -14,9 +14,9 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/cluster/store"
 	"github.com/weaviate/weaviate/cluster/transport"
 )
@@ -30,12 +30,12 @@ type Service struct {
 
 	client     *transport.Client
 	rpcService *transport.Service
-	logger     *slog.Logger
+	logger     *logrus.Logger
 }
 
 func New(cfg store.Config) *Service {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.RPCPort)
-	cl := transport.NewClient(transport.NewRPCResolver(cfg.IsLocalHost, cfg.RPCPort))
+	cl := transport.NewClient(transport.NewRPCResolver(cfg.IsLocalHost, cfg.RPCPort), cfg.RaftRPCMessageMaxSize)
 	fsm := store.New(cfg)
 	server := store.NewService(&fsm, cl)
 	return &Service{
@@ -44,7 +44,7 @@ func New(cfg store.Config) *Service {
 
 		config:     &cfg,
 		client:     cl,
-		rpcService: transport.New(&fsm, server, addr, cfg.Logger),
+		rpcService: transport.New(&fsm, server, addr, cfg.Logger, cfg.RaftRPCMessageMaxSize),
 		logger:     cfg.Logger,
 	}
 }
@@ -52,7 +52,7 @@ func New(cfg store.Config) *Service {
 // Open internal RPC service to handle node communication,
 // bootstrap the Raft node, and restore the database state
 func (c *Service) Open(ctx context.Context, db store.Indexer) error {
-	c.logger.Info("open cluster service", "servers", c.config.ServerName2PortMap)
+	c.logger.WithField("servers", c.config.ServerName2PortMap).Info("open cluster service")
 	if err := c.rpcService.Open(); err != nil {
 		return fmt.Errorf("start rpc service: %w", err)
 	}

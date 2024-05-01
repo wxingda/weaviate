@@ -15,9 +15,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	cmd "github.com/weaviate/weaviate/cluster/proto/api"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/usecases/sharding"
@@ -29,7 +30,7 @@ import (
 type Service struct {
 	store *Store
 	cl    client
-	log   *slog.Logger
+	log   *logrus.Logger
 }
 
 // client to communicate with remote services
@@ -60,7 +61,7 @@ func (s *Service) Close(ctx context.Context) (err error) {
 	if !s.store.IsVoter() {
 		s.log.Info("removing this node from cluster prior to shutdown ...")
 		if err := s.Remove(ctx, s.store.ID()); err != nil {
-			s.log.Error("remove this node from cluster: " + err.Error())
+			s.log.WithError(err).Error("remove this node from cluster")
 		} else {
 			s.log.Info("successfully removed this node from the cluster.")
 		}
@@ -238,7 +239,7 @@ func (s *Service) Execute(req *cmd.ApplyRequest) (uint64, error) {
 
 	leader := s.store.Leader()
 	if leader == "" {
-		return 0, ErrLeaderNotFound
+		return 0, s.leaderErr()
 	}
 	resp, err := s.cl.Apply(leader, req)
 	if err != nil {
@@ -249,13 +250,17 @@ func (s *Service) Execute(req *cmd.ApplyRequest) (uint64, error) {
 }
 
 func (s *Service) Join(ctx context.Context, id, addr string, voter bool) error {
-	// log.Printf("membership.join %v %v %v", id, addr, voter)
+	s.log.WithFields(logrus.Fields{
+		"id":      id,
+		"address": addr,
+		"voter":   voter,
+	}).Debug("membership.join")
 	if s.store.IsLeader() {
 		return s.store.Join(id, addr, voter)
 	}
 	leader := s.store.Leader()
 	if leader == "" {
-		return ErrLeaderNotFound
+		return s.leaderErr()
 	}
 	req := &cmd.JoinPeerRequest{Id: id, Address: addr, Voter: voter}
 	_, err := s.cl.Join(ctx, leader, req)
@@ -263,13 +268,13 @@ func (s *Service) Join(ctx context.Context, id, addr string, voter bool) error {
 }
 
 func (s *Service) Remove(ctx context.Context, id string) error {
-	// log.Printf("membership.remove %v ", id)
+	s.log.WithField("id", id).Debug("membership.remove")
 	if s.store.IsLeader() {
 		return s.store.Remove(id)
 	}
 	leader := s.store.Leader()
 	if leader == "" {
-		return ErrLeaderNotFound
+		return s.leaderErr()
 	}
 	req := &cmd.RemovePeerRequest{Id: id}
 	_, err := s.cl.Remove(ctx, leader, req)
@@ -277,7 +282,7 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 }
 
 func (s *Service) Stats() map[string]any {
-	// log.Printf("membership.Stats")
+	s.log.Debug("membership.stats")
 	return s.store.Stats()
 }
 
@@ -409,30 +414,30 @@ func (s *Service) QueryShardOwner(class, shard string) (string, uint64, error) {
 // QueryShardOwner build a Query to read the tenant and activity status  of a given class and tenant pair.
 // The request will be directed to the leader to ensure we  will read the tenant with strong consistency and return the
 // shard owner node
-func (s *Service) QueryTenantShard(class, tenant string) (string, string, uint64, error) {
+func (s *Service) QueryTenantsShards(class string, tenants ...string) (map[string]string, uint64, error) {
 	// Build the query and execute it
-	req := cmd.QueryTenantShardRequest{Class: class, Tenant: tenant}
+	req := cmd.QueryTenantsShardsRequest{Class: class, Tenants: tenants}
 	subCommand, err := json.Marshal(&req)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("marshal request: %w", err)
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
 	}
 	command := &cmd.QueryRequest{
-		Type:       cmd.QueryRequest_TYPE_GET_TENANT_SHARD,
+		Type:       cmd.QueryRequest_TYPE_GET_TENANTS_SHARDS,
 		SubCommand: subCommand,
 	}
 	queryResp, err := s.Query(context.Background(), command)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
 	}
 
 	// Unmarshal the response
-	resp := cmd.QueryTenantShardResponse{}
+	resp := cmd.QueryTenantsShardsResponse{}
 	err = json.Unmarshal(queryResp.Payload, &resp)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to unmarshal query result: %w", err)
+		return nil, 0, fmt.Errorf("failed to unmarshal query result: %w", err)
 	}
 
-	return resp.Tenant, resp.ActivityStatus, resp.SchemaVersion, nil
+	return resp.TenantsActivityStatus, resp.SchemaVersion, nil
 }
 
 // Query receives a QueryRequest and ensure it is executed on the leader and returns the related QueryResponse
@@ -444,7 +449,7 @@ func (s *Service) Query(ctx context.Context, req *cmd.QueryRequest) (*cmd.QueryR
 
 	leader := s.store.Leader()
 	if leader == "" {
-		return &cmd.QueryResponse{}, ErrLeaderNotFound
+		return &cmd.QueryResponse{}, s.leaderErr()
 	}
 
 	return s.cl.Query(ctx, leader, req)
@@ -459,4 +464,22 @@ func removeNilTenants(tenants []*cmd.Tenant) []*cmd.Tenant {
 		}
 	}
 	return tenants[:n]
+}
+
+// leaderErr decorates ErrLeaderNotFound by distinguishing between
+// normal election happening and there is no leader been chosen yet
+// and if it can't reach the other nodes either for intercluster
+// communication issues or other nodes were down.
+func (s *Service) leaderErr() error {
+	if s.store.addResolver != nil && len(s.store.addResolver.notResolvedNodes) > 0 {
+		var nodes []string
+		for n := range s.store.addResolver.notResolvedNodes {
+			nodes = append(nodes, string(n))
+		}
+
+		return fmt.Errorf("%w, can not resolve nodes [%s]",
+			ErrLeaderNotFound,
+			strings.Join(nodes, ","))
+	}
+	return ErrLeaderNotFound
 }

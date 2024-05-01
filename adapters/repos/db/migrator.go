@@ -20,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/helpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/inverted"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/dynamic"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/flat"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw"
 	"github.com/weaviate/weaviate/entities/errorcompounder"
@@ -308,7 +309,7 @@ func (m *Migrator) NewTenants(ctx context.Context, class *models.Class, creates 
 	return ec.ToError()
 }
 
-// UpdateTenans activates or deactivates tenant partitions and returns a commit func
+// UpdateTenants activates or deactivates tenant partitions and returns a commit func
 // that can be used to either commit or rollback the changes
 func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updates []*schemaUC.UpdateTenantPayload) error {
 	idx := m.db.GetIndex(schema.ClassName(class.Class))
@@ -409,6 +410,8 @@ func (m *Migrator) ValidateVectorIndexConfigUpdate(
 		return hnsw.ValidateUserConfigUpdate(old, updated)
 	case "flat":
 		return flat.ValidateUserConfigUpdate(old, updated)
+	case "dynamic":
+		return dynamic.ValidateUserConfigUpdate(old, updated)
 	}
 	return fmt.Errorf("Invalid index type: %s", old.IndexType())
 }

@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -39,6 +38,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/handlers/rest/clusterapi"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/state"
+	"github.com/weaviate/weaviate/adapters/handlers/rest/tenantactivity"
 	"github.com/weaviate/weaviate/adapters/repos/classifications"
 	"github.com/weaviate/weaviate/adapters/repos/db"
 	"github.com/weaviate/weaviate/adapters/repos/db/inverted"
@@ -140,10 +140,13 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 	setupGoProfiling(appState.ServerConfig.Config, appState.Logger)
 
 	if appState.ServerConfig.Config.Monitoring.Enabled {
+		appState.TenantActivity = tenantactivity.NewHandler()
+
 		// only monitoring tool supported at the moment is prometheus
 		enterrors.GoWrapper(func() {
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.Handler())
+			mux.Handle("/tenant-activity", appState.TenantActivity)
 			http.ListenAndServe(fmt.Sprintf(":%d", appState.ServerConfig.Config.Monitoring.Port), mux)
 		}, appState.Logger)
 	}
@@ -213,6 +216,9 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 	}
 
 	appState.DB = repo
+	if appState.ServerConfig.Config.Monitoring.Enabled {
+		appState.TenantActivity.SetSource(appState.DB)
+	}
 	migrator := db.NewMigrator(repo, appState.Logger)
 	vectorRepo = repo
 	// migrator = vectorMigrator
@@ -266,29 +272,31 @@ func MakeAppState(ctx context.Context, options *swag.CommandLineOptionsGroup) *s
 	dataPath := appState.ServerConfig.Config.Persistence.DataPath
 
 	rConfig := rStore.Config{
-		WorkDir:            filepath.Join(dataPath, "raft"),
-		NodeID:             nodeName,
-		Host:               addrs[0],
-		RaftPort:           appState.ServerConfig.Config.Raft.Port,
-		RPCPort:            appState.ServerConfig.Config.Raft.InternalRPCPort,
-		ServerName2PortMap: server2port,
-		BootstrapTimeout:   appState.ServerConfig.Config.Raft.BootstrapTimeout,
-		BootstrapExpect:    appState.ServerConfig.Config.Raft.BootstrapExpect,
-		HeartbeatTimeout:   appState.ServerConfig.Config.Raft.HeartbeatTimeout,
-		RecoveryTimeout:    appState.ServerConfig.Config.Raft.RecoveryTimeout,
-		ElectionTimeout:    appState.ServerConfig.Config.Raft.ElectionTimeout,
-		SnapshotInterval:   appState.ServerConfig.Config.Raft.SnapshotInterval,
-		SnapshotThreshold:  appState.ServerConfig.Config.Raft.SnapshotThreshold,
-		UpdateWaitTimeout:  time.Second * 10, // TODO-RAFT read from the flag
-		DB:                 nil,
-		Parser:             schema.NewParser(appState.Cluster, vectorIndex.ParseAndValidateConfig, migrator),
-		AddrResolver:       appState.Cluster,
-		Logger:             sLogger(),
-		LogLevel:           logLevel(),
-		LogJSONFormat:      !logTextFormat(),
-		IsLocalHost:        appState.ServerConfig.Config.Cluster.Localhost,
-		LoadLegacySchema:   schemaRepo.LoadLegacySchema,
-		SaveLegacySchema:   schemaRepo.SaveLegacySchema,
+		WorkDir:               filepath.Join(dataPath, "raft"),
+		NodeID:                nodeName,
+		Host:                  addrs[0],
+		RaftPort:              appState.ServerConfig.Config.Raft.Port,
+		RPCPort:               appState.ServerConfig.Config.Raft.InternalRPCPort,
+		RaftRPCMessageMaxSize: appState.ServerConfig.Config.Raft.RPCMessageMaxSize,
+		ServerName2PortMap:    server2port,
+		BootstrapTimeout:      appState.ServerConfig.Config.Raft.BootstrapTimeout,
+		BootstrapExpect:       appState.ServerConfig.Config.Raft.BootstrapExpect,
+		HeartbeatTimeout:      appState.ServerConfig.Config.Raft.HeartbeatTimeout,
+		RecoveryTimeout:       appState.ServerConfig.Config.Raft.RecoveryTimeout,
+		ElectionTimeout:       appState.ServerConfig.Config.Raft.ElectionTimeout,
+		SnapshotInterval:      appState.ServerConfig.Config.Raft.SnapshotInterval,
+		SnapshotThreshold:     appState.ServerConfig.Config.Raft.SnapshotThreshold,
+		UpdateWaitTimeout:     time.Second * 10, // TODO-RAFT read from the flag
+		MetadataOnlyVoters:    appState.ServerConfig.Config.Raft.MetadataOnlyVoters,
+		DB:                    nil,
+		Parser:                schema.NewParser(appState.Cluster, vectorIndex.ParseAndValidateConfig, migrator),
+		AddrResolver:          appState.Cluster,
+		Logger:                appState.Logger,
+		LogLevel:              logLevel(),
+		LogJSONFormat:         !logTextFormat(),
+		IsLocalHost:           appState.ServerConfig.Config.Cluster.Localhost,
+		LoadLegacySchema:      schemaRepo.LoadLegacySchema,
+		SaveLegacySchema:      schemaRepo.SaveLegacySchema,
 	}
 	for _, name := range appState.ServerConfig.Config.Raft.Join[:rConfig.BootstrapExpect] {
 		if strings.Contains(name, rConfig.NodeID) {
@@ -440,6 +448,16 @@ func parseNode2Port(appState *state.State) (m map[string]int, err error) {
 	}
 
 	return m, nil
+}
+
+// parseVotersNames parses names of all voters.
+// If we reach this point, we assume that the configuration is valid
+func parseVotersNames(cfg config.Raft) (m map[string]struct{}) {
+	m = make(map[string]struct{}, cfg.BootstrapExpect)
+	for _, raftNamePort := range cfg.Join[:cfg.BootstrapExpect] {
+		m[strings.Split(raftNamePort, ":")[0]] = struct{}{}
+	}
+	return m
 }
 
 func configureAPI(api *operations.WeaviateAPI) http.Handler {
@@ -600,7 +618,11 @@ func startupRoutine(ctx context.Context, options *swag.CommandLineOptionsGroup) 
 	logger.WithField("action", "startup").WithField("startup_time_left", timeTillDeadline(ctx)).
 		Debug("initialized schema")
 
-	clusterState, err := cluster.Init(serverConfig.Config.Cluster, dataPath, logger)
+	var nonStorageNodes map[string]struct{}
+	if cfg := serverConfig.Config.Raft; cfg.MetadataOnlyVoters {
+		nonStorageNodes = parseVotersNames(cfg)
+	}
+	clusterState, err := cluster.Init(serverConfig.Config.Cluster, dataPath, nonStorageNodes, logger)
 	if err != nil {
 		logger.WithField("action", "startup").WithError(err).
 			Error("could not init cluster state")
@@ -646,31 +668,6 @@ func logger() *logrus.Logger {
 	}
 
 	return logger
-}
-
-// sLogger returns an initialized standard logger
-// This logger should replace logrus in future
-func sLogger() *slog.Logger {
-	opts := slog.HandlerOptions{}
-	switch os.Getenv("LOG_LEVEL") {
-	case "debug":
-		opts.Level = slog.LevelDebug
-	case "warn":
-		opts.Level = slog.LevelWarn
-	case "error":
-		opts.Level = slog.LevelError
-	default:
-		opts.Level = slog.LevelInfo
-	}
-
-	var handler slog.Handler
-	if logTextFormat() {
-		handler = slog.NewTextHandler(os.Stderr, &opts)
-	} else {
-		handler = slog.NewJSONHandler(os.Stderr, &opts)
-	}
-
-	return slog.New(handler)
 }
 
 func logLevel() string {

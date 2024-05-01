@@ -15,11 +15,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/sirupsen/logrus"
 	cmd "github.com/weaviate/weaviate/cluster/proto/api"
 )
 
 func (st *Store) Query(req *cmd.QueryRequest) (*cmd.QueryResponse, error) {
-	st.log.Debug("server.query", "type", req.Type)
+	st.log.WithField("type", req.Type).Debug("server.query")
 
 	var payload []byte
 	var err error
@@ -44,8 +45,8 @@ func (st *Store) Query(req *cmd.QueryRequest) (*cmd.QueryResponse, error) {
 		if err != nil {
 			return &cmd.QueryResponse{}, fmt.Errorf("could not get shard owner: %w", err)
 		}
-	case cmd.QueryRequest_TYPE_GET_TENANT_SHARD:
-		payload, err = st.QueryTenantShard(req)
+	case cmd.QueryRequest_TYPE_GET_TENANTS_SHARDS:
+		payload, err = st.QueryTenantsShards(req)
 		if err != nil {
 			return &cmd.QueryResponse{}, fmt.Errorf("could not get tenant shard: %w", err)
 		}
@@ -54,7 +55,10 @@ func (st *Store) Query(req *cmd.QueryRequest) (*cmd.QueryResponse, error) {
 		// This could occur when a new command has been introduced in a later app version
 		// At this point, we need to panic so that the app undergo an upgrade during restart
 		const msg = "consider upgrading to newer version"
-		st.log.Error("unknown command", "type", req.Type, "more", msg)
+		st.log.WithFields(logrus.Fields{
+			"type": req.Type,
+			"more": msg,
+		}).Error("unknown command")
 		return &cmd.QueryResponse{}, fmt.Errorf("unknown command type %s: %s", req.Type, msg)
 	}
 	return &cmd.QueryResponse{Payload: payload}, nil
@@ -139,18 +143,17 @@ func (st *Store) QueryShardOwner(req *cmd.QueryRequest) ([]byte, error) {
 	return payload, nil
 }
 
-func (st *Store) QueryTenantShard(req *cmd.QueryRequest) ([]byte, error) {
+func (st *Store) QueryTenantsShards(req *cmd.QueryRequest) ([]byte, error) {
 	// Validate that the subcommand is the correct type
-	subCommand := cmd.QueryTenantShardRequest{}
+	subCommand := cmd.QueryTenantsShardsRequest{}
 	if err := json.Unmarshal(req.SubCommand, &subCommand); err != nil {
 		return []byte{}, fmt.Errorf("%w: %w", errBadRequest, err)
 	}
 
 	// Read the meta class to get both the class and sharding information
-	tenant, activityStatus, version := st.db.Schema.TenantShard(subCommand.Class, subCommand.Tenant)
-
+	tenants, version := st.db.Schema.TenantsShards(subCommand.Class, subCommand.Tenants...)
 	// Build the response, marshal and return
-	response := cmd.QueryTenantShardResponse{Tenant: tenant, ActivityStatus: activityStatus, SchemaVersion: version}
+	response := cmd.QueryTenantsShardsResponse{TenantsActivityStatus: tenants, SchemaVersion: version}
 	payload, err := json.Marshal(&response)
 	if err != nil {
 		return []byte{}, fmt.Errorf("could not marshal query response: %w", err)
