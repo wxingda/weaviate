@@ -13,9 +13,11 @@ package inverted
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -258,12 +260,21 @@ func (t *JsonPropertyLengthTracker) PropertyTally(propName string) (int, int, fl
 
 // Writes the current state of the tracker to disk.  (flushBackup = true) will only write the backup file
 func (t *JsonPropertyLengthTracker) Flush(flushBackup bool) error {
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: start\n", t.path, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: end\n", t.path, time.Now())
+	}()
+
 	if !flushBackup { // Write the backup file first
 		t.Flush(true)
 	}
 
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: flush\n", t.path, time.Now())
+
 	t.Lock()
 	defer t.Unlock()
+
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: locked\n", t.path, time.Now())
 
 	bytes, err := json.Marshal(t.data)
 	if err != nil {
@@ -278,30 +289,45 @@ func (t *JsonPropertyLengthTracker) Flush(flushBackup bool) error {
 	// Do a write+rename to avoid corrupting the file if we crash while writing
 	tempfile := filename + ".tmp"
 
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: marshalled\n", t.path, time.Now())
+
 	err = WriteFile(tempfile, bytes, 0o666)
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: written\n", t.path, time.Now())
 
 	err = os.Rename(tempfile, filename)
 	if err != nil {
 		return err
 	}
 
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::Flush: renamed\n", t.path, time.Now())
+
 	return nil
 }
 
 func WriteFile(name string, data []byte, perm os.FileMode) error {
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::WriteFile: start\n", name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::WriteFile: end\n", name, time.Now())
+	}()
+
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::WriteFile: opened\n", name, time.Now())
+
 	_, err = f.Write(data)
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("  ==> [%s][%s] JsonPropertyLengthTracker::WriteFile: written\n", name, time.Now())
 
 	// TODO: f.Sync() is introducing performance penalization at this point
 	// it will be addressed as part of another PR

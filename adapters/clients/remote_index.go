@@ -112,14 +112,15 @@ func (c *RemoteIndex) BatchPutObjects(ctx context.Context, host, index,
 		return nil
 	}
 
-	fmt.Printf("  ==> [%s][%s] BatchPutObjects: start\n", shard, time.Now())
+	fmt.Printf("  ==> [%s][%s] RemoteIndex::BatchPutObjects: start\n", shard, time.Now())
 	defer func() {
 		if err != nil {
+			fmt.Printf("  ==> [%s][%s] RemoteIndex::BatchPutObjects: err %q\n", shard, time.Now(), err)
 			for _, o := range objs {
-				fmt.Printf("  ==> [%s][%s] BatchPutObjects: obj %+v\n", shard, time.Now(), o.Object)
+				fmt.Printf("  ==> [%s][%s] RemoteIndex::BatchPutObjects: obj %+v\n", shard, time.Now(), o.Object)
 			}
 		}
-		fmt.Printf("  ==> [%s][%s] BatchPutObjects: end\n", shard, time.Now())
+		fmt.Printf("  ==> [%s][%s] RemoteIndex::BatchPutObjects: end\n", shard, time.Now())
 	}()
 
 	if err = c.doWithCustomMarshaller(c.timeoutUnit*30, req, body, decode, successCode); err != nil {

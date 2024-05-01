@@ -590,6 +590,8 @@ func (ob *objectsBatcher) flushWALs(ctx context.Context) {
 			ob.setErrorAtIndex(err, i)
 		}
 	}
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::flushWALs: PropertyLengthTracker.Flush\n", ob.shard.Name(), time.Now())
 }
 
 // returns the originalIndexIDs to be ignored

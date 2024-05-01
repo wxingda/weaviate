@@ -390,8 +390,10 @@ func (i *Index) initAndStoreShards(ctx context.Context, shardState *sharding.Sta
 func (i *Index) initAndStoreShard(ctx context.Context, shardName string, class *models.Class,
 	promMetrics *monitoring.PrometheusMetrics,
 ) error {
-	fmt.Printf("  ==> [%s] initAndStoreShard start\n", shardName)
-	defer fmt.Printf("  ==> [%s] initAndStoreShard defer\n", shardName)
+	fmt.Printf("  ==> [%s][%s] initAndStoreShard start\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] initAndStoreShard defer\n", shardName, time.Now())
+	}()
 
 	if i.Config.DisableLazyLoadShards {
 		if err := i.allocChecker.CheckMappingAndReserve(3, int(lsmkv.FlushAfterDirtyDefault.Seconds())); err != nil {
@@ -407,7 +409,7 @@ func (i *Index) initAndStoreShard(ctx context.Context, shardName string, class *
 	}
 
 	shard := NewLazyLoadShard(ctx, promMetrics, shardName, i, class, i.centralJobQueue, i.indexCheckpoints, i.allocChecker)
-	fmt.Printf("  ==> [%s] initAndStoreShard store\n", shardName)
+	fmt.Printf("  ==> [%s][%s] initAndStoreShard store\n", shardName, time.Now())
 	i.shards.Store(shardName, shard)
 	return nil
 }
@@ -828,7 +830,9 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 		wg.Add(1)
 		f := func() {
 			fmt.Printf("  ==> [%s][%s] putObjectBatch: routine start\n", shardName, time.Now())
-			defer fmt.Printf("  ==> [%s][%s] putObjectBatch: routine end\n", shardName, time.Now())
+			defer func() {
+				fmt.Printf("  ==> [%s][%s] putObjectBatch: routine end\n", shardName, time.Now())
+			}()
 
 			defer wg.Done()
 
@@ -959,7 +963,7 @@ func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 	defer func() {
 		if len(errors) > 0 {
 			for _, e := range errors {
-				fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects: error %q\n", shardName, e, time.Now())
+				fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects: error %q\n", shardName, time.Now(), e)
 			}
 		}
 	}()
@@ -1712,15 +1716,15 @@ func (i *Index) localShard(name string) ShardLike {
 
 func (i *Index) getOrInitLocalShardWithShutdownPrevention(ctx context.Context, shardName string,
 ) (ShardLike, func(), error) {
-	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: start [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: start\n", shardName, time.Now())
 	defer func() {
-		fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: end [%s]\n", shardName, time.Now())
+		fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: end\n", shardName, time.Now())
 	}()
 
 	i.shardLocks.RLock(shardName)
 	defer i.shardLocks.RUnlock(shardName)
 
-	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: rlocked [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: rlocked\n", shardName, time.Now())
 
 	shard, err := i.getOrInitLocalShard(ctx, shardName)
 	if err != nil {
@@ -1735,15 +1739,15 @@ func (i *Index) getOrInitLocalShardWithShutdownPrevention(ctx context.Context, s
 }
 
 func (i *Index) getLocalShardWithShutdownPrevention(shardName string) (ShardLike, func(), error) {
-	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: start [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: start\n", shardName, time.Now())
 	defer func() {
-		fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: end [%s]\n", shardName, time.Now())
+		fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: end\n", shardName, time.Now())
 	}()
 
 	i.shardLocks.RLock(shardName)
 	defer i.shardLocks.RUnlock(shardName)
 
-	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: rlocked [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: rlocked\n", shardName, time.Now())
 
 	shard := i.shards.Load(shardName)
 	if shard == nil {
