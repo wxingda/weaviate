@@ -331,9 +331,9 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 	ec := &errorcompounder.ErrorCompounder{}
 
 	for _, name := range updatesHot {
-		fmt.Printf("  ==> [%s] UpdateTenants HOT start\n", name)
+		fmt.Printf("  ==> [%s][%s] UpdateTenants HOT start\n", name, time.Now())
 		_, err := idx.getOrInitLocalShard(ctx, name)
-		fmt.Printf("  ==> [%s] UpdateTenants HOT end\n", name)
+		fmt.Printf("  ==> [%s][%s] UpdateTenants HOT end\n", name, time.Now())
 		ec.Add(err)
 	}
 
@@ -347,26 +347,28 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 		for _, name := range updatesCold {
 			name := name
 			eg.Go(func() error {
-				fmt.Printf("  ==> [%s] UpdateTenants COLD start\n", name)
-				defer fmt.Printf("  ==> [%s] UpdateTenants COLD end\n", name)
+				fmt.Printf("  ==> [%s][%s] UpdateTenants COLD start\n", name, time.Now())
+				defer func() {
+					fmt.Printf("  ==> [%s][%s] UpdateTenants COLD end\n", name, time.Now())
+				}()
 
 				shard := func() ShardLike {
 					idx.shardLocks.Lock(name)
 					defer idx.shardLocks.Unlock(name)
 
-					fmt.Printf("  ==> [%s] UpdateTenants COLD load\n", name)
+					fmt.Printf("  ==> [%s][%s] UpdateTenants COLD load\n", name, time.Now())
 					return idx.shards.Load(name)
 				}()
 
 				if shard == nil {
-					fmt.Printf("  ==> [%s] UpdateTenants COLD return\n", name)
+					fmt.Printf("  ==> [%s][%s] UpdateTenants COLD return\n", name, time.Now())
 					return nil // shard already does not exist or inactive
 				}
 
 				idx.shardCreateLocks.Lock(name)
 				defer idx.shardCreateLocks.Unlock(name)
 
-				fmt.Printf("  ==> [%s] UpdateTenants COLD load and delete\n", name)
+				fmt.Printf("  ==> [%s][%s] UpdateTenants COLD load and delete\n", name, time.Now())
 				idx.shards.LoadAndDelete(name) // then remove entry
 
 				// if !ok {
@@ -374,14 +376,14 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 				// 	return nil // shard already does not exist or inactive
 				// }
 
-				fmt.Printf("  ==> [%s] UpdateTenants COLD shutdown start\n", name)
+				fmt.Printf("  ==> [%s][%s] UpdateTenants COLD shutdown start\n", name, time.Now())
 				if err := shard.Shutdown(ctx); err != nil {
-					fmt.Printf("  ==> [%s] UpdateTenants COLD shutdown err %q\n", name, err)
+					fmt.Printf("  ==> [%s][%s] UpdateTenants COLD shutdown err %q\n", name, time.Now(), err)
 					ec.Add(err)
 					idx.logger.WithField("action", "shutdown_shard").
 						WithField("shard", shard.ID()).Error(err)
 				}
-				fmt.Printf("  ==> [%s] UpdateTenants COLD shutdown end\n", name)
+				fmt.Printf("  ==> [%s][%s] UpdateTenants COLD shutdown end\n", name, time.Now())
 				return nil
 			})
 		}

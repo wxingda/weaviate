@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -306,8 +307,9 @@ func (i *indices) postObject() http.Handler {
 
 		switch ct {
 		case IndicesPayloads.ObjectList.MIME():
-			fmt.Printf("  ====> [%s] incoming postObjectBatch\n", shard)
+			fmt.Printf("  ====> [%s][%s] incoming postObjectBatch: start\n", shard, time.Now())
 			i.postObjectBatch(w, r, index, shard)
+			fmt.Printf("  ====> [%s][%s] incoming postObjectBatch: end\n", shard, time.Now())
 			return
 
 		case IndicesPayloads.SingleObject.MIME():

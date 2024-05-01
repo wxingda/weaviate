@@ -55,24 +55,24 @@ func (s *Shard) PutObjectBatch(ctx context.Context,
 }
 
 func (s *Shard) preventShutdown() (release func(), err error) {
-	fmt.Printf("  ==> [%s] preventShutdown: start [%s]\n", s.name, time.Now())
+	fmt.Printf("  ==> [%s][%s] preventShutdown: start\n", s.name, time.Now())
 	defer func() {
-		fmt.Printf("  ==> [%s] preventShutdown: end [%s]\n", s.name, time.Now())
+		fmt.Printf("  ==> [%s][%s] preventShutdown: end\n", s.name, time.Now())
 	}()
 
 	s.shutdownLock.RLock()
 	defer s.shutdownLock.RUnlock()
 
 	if s.shut {
-		fmt.Printf("  ==> [%s] preventShutdown: already shut [%s]\n", s.name, time.Now())
+		fmt.Printf("  ==> [%s][%s] preventShutdown: already shut\n", s.name, time.Now())
 		return func() {}, fmt.Errorf("already shut or dropped %q", s.name)
 	}
 
-	fmt.Printf("  ==> [%s] preventShutdown: increment [%s]\n", s.name, time.Now())
+	fmt.Printf("  ==> [%s][%s] preventShutdown: increment\n", s.name, time.Now())
 	s.inUseCounter.Add(1)
 
 	return func() {
-		fmt.Printf("  ==> [%s] preventShutdown: decrement [%s]\n", s.name, time.Now())
+		fmt.Printf("  ==> [%s][%s] preventShutdown: decrement\n", s.name, time.Now())
 		s.inUseCounter.Add(-1)
 	}, nil
 }
@@ -89,8 +89,10 @@ func asyncEnabled() bool {
 func (s *Shard) putBatch(ctx context.Context,
 	objects []*storobj.Object,
 ) []error {
-	fmt.Printf("  ==> [%s] putBatch start\n", s.Name())
-	defer fmt.Printf("  ==> [%s] putBatch end\n", s.Name())
+	fmt.Printf("  ==> [%s][%s] putBatch: start\n", s.Name(), time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] putBatch: end\n", s.Name(), time.Now())
+	}()
 
 	if asyncEnabled() {
 		return s.putBatchAsync(ctx, objects)
@@ -101,9 +103,16 @@ func (s *Shard) putBatch(ctx context.Context,
 	batcher := newObjectsBatcher(s)
 	err := batcher.Objects(ctx, objects)
 
+	fmt.Printf("  ==> [%s][%s] putBatch: after objects\n", s.Name(), time.Now())
+
 	// block until all objects of batch have been added
 	batcher.wg.Wait()
+
+	fmt.Printf("  ==> [%s][%s] putBatch: after wait\n", s.Name(), time.Now())
+
 	s.metrics.VectorIndex(batcher.batchStartTime)
+
+	fmt.Printf("  ==> [%s][%s] putBatch: after metrics vector\n", s.Name(), time.Now())
 
 	return err
 }
@@ -118,7 +127,7 @@ func (s *Shard) putBatchAsync(ctx context.Context, objects []*storobj.Object) []
 	batcher.storeInObjectStore(ctx)
 	batcher.markDeletedInVectorStorage(ctx)
 	batcher.storeAdditionalStorageWithAsyncQueue(ctx)
-	fmt.Printf("  ==> [%s] putBatchAsync flushWALs objectsBatcher start\n", s.Name())
+	// fmt.Printf("  ==> [%s] putBatchAsync flushWALs objectsBatcher start\n", s.Name())
 	batcher.flushWALs(ctx)
 
 	return batcher.errs
@@ -146,15 +155,34 @@ func newObjectsBatcher(s ShardLike) *objectsBatcher {
 func (ob *objectsBatcher) Objects(ctx context.Context,
 	objects []*storobj.Object,
 ) []error {
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: start\n", ob.shard.Name(), time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: end\n", ob.shard.Name(), time.Now())
+	}()
+
 	beforeBatch := time.Now()
 	defer ob.shard.Metrics().BatchObject(beforeBatch, len(objects))
 
 	ob.init(objects)
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: init\n", ob.shard.Name(), time.Now())
+
 	ob.storeInObjectStore(ctx)
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: storeInObjectStore\n", ob.shard.Name(), time.Now())
+
 	ob.markDeletedInVectorStorage(ctx)
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: markDeletedInVectorStorage\n", ob.shard.Name(), time.Now())
+
 	ob.storeAdditionalStorageWithWorkers(ctx)
-	fmt.Printf("  ==> [%s] Objects flushWALs objectsBatcher start\n", ob.shard.Name())
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: storeAdditionalStorageWithWorkers\n", ob.shard.Name(), time.Now())
+
 	ob.flushWALs(ctx)
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::Objects: flushWALs\n", ob.shard.Name(), time.Now())
+
 	return ob.errs
 }
 
@@ -528,14 +556,16 @@ func (ob *objectsBatcher) checkContext(ctx context.Context) bool {
 }
 
 func (ob *objectsBatcher) flushWALs(ctx context.Context) {
-	fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher start\n", ob.shard.Name())
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::flushWALs: start\n", ob.shard.Name(), time.Now())
 	if err := ob.shard.Store().WriteWALs(); err != nil {
-		fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher err %q\n", ob.shard.Name(), err)
+		fmt.Printf("  ==> [%s][%s] objectsBatcher::flushWALs: err %q\n", ob.shard.Name(), time.Now(), err)
 		for i := range ob.objects {
 			ob.setErrorAtIndex(err, i)
 		}
 	}
-	fmt.Printf("  ==> [%s] WriteWALs flushWALs objectsBatcher end\n", ob.shard.Name())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] objectsBatcher::flushWALs: end\n", ob.shard.Name(), time.Now())
+	}()
 
 	if ob.shard.hasTargetVectors() {
 		for targetVector, vectorIndex := range ob.shard.VectorIndexes() {
@@ -552,6 +582,8 @@ func (ob *objectsBatcher) flushWALs(ctx context.Context) {
 			}
 		}
 	}
+
+	fmt.Printf("  ==> [%s][%s] objectsBatcher::flushWALs: vector index flush\n", ob.shard.Name(), time.Now())
 
 	if err := ob.shard.GetPropertyLengthTracker().Flush(false); err != nil {
 		for i := range ob.objects {

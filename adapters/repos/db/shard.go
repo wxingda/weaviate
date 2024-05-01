@@ -211,15 +211,20 @@ type Shard struct {
 	bitmapFactory  *roaringset.BitmapFactory
 
 	activityTracker atomic.Int32
-	shut         bool
-	inUseCounter atomic.Int64
-	shutdownLock *sync.RWMutex
+	shut            bool
+	inUseCounter    atomic.Int64
+	shutdownLock    *sync.RWMutex
 }
 
 func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 	shardName string, index *Index, class *models.Class, jobQueueCh chan job,
 	indexCheckpoints *indexcheckpoint.Checkpoints,
 ) (*Shard, error) {
+	fmt.Printf("  ==> [%s][%s] NewShard: start\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] NewShard: end\n", shardName, time.Now())
+	}()
+
 	before := time.Now()
 	var err error
 	s := &Shard{
@@ -237,8 +242,12 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		shutdownLock: new(sync.RWMutex),
 	}
 
+	fmt.Printf("  ==> [%s][%s] NewShard: struct\n", shardName, time.Now())
+
 	s.activityTracker.Store(1) // initial state
 	s.initCycleCallbacks()
+
+	fmt.Printf("  ==> [%s][%s] NewShard: initCycleCallbacks\n", shardName, time.Now())
 
 	s.docIdLock = make([]sync.Mutex, IdLockPoolSize)
 
@@ -254,27 +263,45 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		return nil, err
 	}
 
+	fmt.Printf("  ==> [%s][%s] NewShard: MkdirAll\n", shardName, time.Now())
+
 	if err := s.initNonVector(ctx, class); err != nil {
 		return nil, errors.Wrapf(err, "init shard %q", s.ID())
 	}
+
+	fmt.Printf("  ==> [%s][%s] NewShard: initNonVector\n", shardName, time.Now())
 
 	if s.hasTargetVectors() {
 		if err := s.initTargetVectors(ctx); err != nil {
 			return nil, err
 		}
+
+		fmt.Printf("  ==> [%s][%s] NewShard: initTargetVectors\n", shardName, time.Now())
+
 		if err := s.initTargetQueues(); err != nil {
 			return nil, err
 		}
+
+		fmt.Printf("  ==> [%s][%s] NewShard: initTargetQueues\n", shardName, time.Now())
+
 	} else {
 		if err := s.initLegacyVector(ctx); err != nil {
 			return nil, err
 		}
+
+		fmt.Printf("  ==> [%s][%s] NewShard: initLegacyVector\n", shardName, time.Now())
+
 		if err := s.initLegacyQueue(); err != nil {
 			return nil, err
 		}
+
+		fmt.Printf("  ==> [%s][%s] NewShard: initLegacyQueue\n", shardName, time.Now())
+
 	}
 
 	s.initDimensionTracking()
+
+	fmt.Printf("  ==> [%s][%s] NewShard: initDimensionTracking\n", shardName, time.Now())
 
 	if asyncEnabled() {
 		f := func() {
@@ -296,6 +323,8 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		enterrors.GoWrapper(f, s.index.logger)
 	}
 	s.NotifyReady()
+
+	fmt.Printf("  ==> [%s][%s] NewShard: NotifyReady\n", shardName, time.Now())
 
 	if exists {
 		s.index.logger.Printf("Completed loading shard %s in %s", s.ID(), time.Since(before))
@@ -978,12 +1007,12 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		defer s.shutdownLock.Unlock()
 
 		if s.shut {
-			fmt.Printf("  ==> [%s] Shutdown: already shut\n", s.name)
+			fmt.Printf("  ==> [%s][%s] Shutdown: already shut\n", s.name, time.Now())
 			return false, fmt.Errorf("already shut or ongoing shutdown")
 		}
 
 		if s.inUseCounter.Load() == 0 {
-			fmt.Printf("  ==> [%s] Shutdown: shutting down\n", s.name)
+			fmt.Printf("  ==> [%s][%s] Shutdown: shutting down\n", s.name, time.Now())
 			s.shut = true
 			return true, nil
 		}
@@ -992,7 +1021,7 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 
 	var shut bool
 	if shut, err = shutdownCheck(); err != nil {
-		fmt.Printf("  ==> [%s] Shutdown: error %q\n", s.name, err)
+		fmt.Printf("  ==> [%s][%s] Shutdown: error %q\n", s.name, time.Now(), err)
 		return
 	}
 	if !shut {
@@ -1004,14 +1033,14 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 			for {
 				select {
 				case <-ctx.Done():
-					fmt.Printf("  ==> [%s] Shutdown: loop [%d] timeout %q\n", s.name, i, ctx.Err())
+					fmt.Printf("  ==> [%s][%s] Shutdown: loop [%d] timeout %q\n", s.name, time.Now(), i, ctx.Err())
 					return ctx.Err()
 				case <-ticker.C:
 					if shut, err := shutdownCheck(); err != nil {
-						fmt.Printf("  ==> [%s] Shutdown: loop [%d] err %q\n", s.name, i, err)
+						fmt.Printf("  ==> [%s][%s] Shutdown: loop [%d] err %q\n", s.name, time.Now(), i, err)
 						return err
 					} else if shut {
-						fmt.Printf("  ==> [%s] Shutdown: loop [%d] ok\n", s.name, i)
+						fmt.Printf("  ==> [%s][%s] Shutdown: loop [%d] ok\n", s.name, time.Now(), i)
 						return nil
 					}
 					i++

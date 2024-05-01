@@ -94,6 +94,11 @@ func (l *LazyLoadShard) mustLoadCtx(ctx context.Context) {
 }
 
 func (l *LazyLoadShard) Load(ctx context.Context) error {
+	fmt.Printf("  ==> [%s][%s] lazy load: start\n", l.shardOpts.name, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] lazy load: end\n", l.shardOpts.name, time.Now())
+	}()
+
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
@@ -101,15 +106,22 @@ func (l *LazyLoadShard) Load(ctx context.Context) error {
 		return nil
 	}
 
+	fmt.Printf("  ==> [%s][%s] lazy load: before monitor\n", l.shardOpts.name, time.Now())
+
 	if err := l.memMonitor.CheckMappingAndReserve(3, int(lsmkv.FlushAfterDirtyDefault.Seconds())); err != nil {
 		return errors.Wrap(err, "memory pressure: cannot load shard")
 	}
+
+	fmt.Printf("  ==> [%s][%s] lazy load: before metrics\n", l.shardOpts.name, time.Now())
 
 	if l.shardOpts.class == nil {
 		l.shardOpts.promMetrics.StartLoadingShard("unknown class")
 	} else {
 		l.shardOpts.promMetrics.StartLoadingShard(l.shardOpts.class.Class)
 	}
+
+	fmt.Printf("  ==> [%s][%s] lazy load: before new shard\n", l.shardOpts.name, time.Now())
+
 	shard, err := NewShard(ctx, l.shardOpts.promMetrics, l.shardOpts.name, l.shardOpts.index,
 		l.shardOpts.class, l.shardOpts.jobQueueCh, l.shardOpts.indexCheckpoints)
 	if err != nil {
@@ -117,6 +129,9 @@ func (l *LazyLoadShard) Load(ctx context.Context) error {
 		l.shardOpts.index.logger.WithField("error", "shard_load").WithError(err).Error(msg)
 		return errors.New(msg)
 	}
+
+	fmt.Printf("  ==> [%s][%s] lazy load: after new shard\n", l.shardOpts.name, time.Now())
+
 	l.shard = shard
 	l.loaded = true
 	if l.shardOpts.class == nil {
@@ -414,16 +429,16 @@ func (l *LazyLoadShard) Queues() map[string]*IndexQueue {
 
 func (l *LazyLoadShard) Shutdown(ctx context.Context) error {
 	if !l.isLoaded() {
-		fmt.Printf("  ==> [%s] LazyLoadShard::Shutdown !loaded\n", l.Name())
+		fmt.Printf("  ==> [%s][%s] LazyLoadShard::Shutdown !loaded\n", l.Name(), time.Now())
 		return nil
 	}
 	return l.shard.Shutdown(ctx)
 }
 
 func (l *LazyLoadShard) preventShutdown() (release func(), err error) {
-	fmt.Printf("  ==> [%s] preventShutdown: lazy start [%s]\n", l.shardOpts.name, time.Now())
+	fmt.Printf("  ==> [%s][%s] preventShutdown: lazy start\n", l.shardOpts.name, time.Now())
 	defer func() {
-		fmt.Printf("  ==> [%s] preventShutdown: lazy end [%s]\n", l.shardOpts.name, time.Now())
+		fmt.Printf("  ==> [%s][%s] preventShutdown: lazy end\n", l.shardOpts.name, time.Now())
 	}()
 
 	if err := l.Load(context.Background()); err != nil {

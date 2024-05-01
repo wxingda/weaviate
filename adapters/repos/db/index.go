@@ -777,8 +777,8 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 		pos     []int
 	}
 
-	fmt.Printf("  ==> [%s] putObjectBatch start\n", i.ID())
-	defer fmt.Printf("  ==> [%s] putObjectBatch end\n", i.ID())
+	fmt.Printf("  ==> [%s][%s] putObjectBatch: start\n", i.ID(), time.Now())
+	defer fmt.Printf("  ==> [%s][%s] putObjectBatch: end\n", i.ID(), time.Now())
 
 	out := make([]error, len(objects))
 	if i.replicationEnabled() && replProps == nil {
@@ -827,8 +827,8 @@ func (i *Index) putObjectBatch(ctx context.Context, objects []*storobj.Object,
 		group := group
 		wg.Add(1)
 		f := func() {
-			fmt.Printf("  ==> [%s] putObjectBatch routine start\n", shardName)
-			defer fmt.Printf("  ==> [%s] putObjectBatch routine end\n", shardName)
+			fmt.Printf("  ==> [%s][%s] putObjectBatch: routine start\n", shardName, time.Now())
+			defer fmt.Printf("  ==> [%s][%s] putObjectBatch: routine end\n", shardName, time.Now())
 
 			defer wg.Done()
 
@@ -922,8 +922,15 @@ func duplicateErr(in error, count int) []error {
 func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 	objects []*storobj.Object, schemaVersion uint64,
 ) []error {
+	fmt.Printf("  ==> [%s][%s] IncomingBatchPutObject: start len [%d]\n", shardName, time.Now(), len(objects))
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] IncomingBatchPutObject: end\n", shardName, time.Now())
+	}()
+
 	i.backupMutex.RLock()
 	defer i.backupMutex.RUnlock()
+
+	fmt.Printf("  ==> [%s][%s] IncomingBatchPutObject: backup locked\n", shardName, time.Now())
 
 	// This is a bit hacky, the problem here is that storobj.Parse() currently
 	// misses date fields as it has no way of knowing that a date-formatted
@@ -938,19 +945,27 @@ func (i *Index) IncomingBatchPutObjects(ctx context.Context, shardName string,
 		}
 	}
 
-	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention before [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention before\n", shardName, time.Now())
 	shard, release, err := i.getOrInitLocalShardWithShutdownPrevention(ctx, shardName)
 	if err != nil {
-		fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention err [%s]\n", shardName, time.Now())
+		fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention err\n", shardName, time.Now())
 		return duplicateErr(ErrShardNotFound, len(objects))
 	}
-	fmt.Printf("  ==> [%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention end [%s]\n", shardName, time.Now())
+	fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects getOrInitLocalShardWithShutdownPrevention end\n", shardName, time.Now())
 
 	defer release()
 
-	fmt.Printf("  ==> [%s] IncomingBatchPutObjects locked [%s]\n", shardName, time.Now())
+	var errors []error
+	defer func() {
+		if len(errors) > 0 {
+			for _, e := range errors {
+				fmt.Printf("  ==> [%s][%s] IncomingBatchPutObjects: error %q\n", shardName, e, time.Now())
+			}
+		}
+	}()
 
-	return shard.PutObjectBatch(ctx, objects)
+	errors = shard.PutObjectBatch(ctx, objects)
+	return errors
 }
 
 // return value map[int]error gives the error for the index as it received it
@@ -1697,8 +1712,15 @@ func (i *Index) localShard(name string) ShardLike {
 
 func (i *Index) getOrInitLocalShardWithShutdownPrevention(ctx context.Context, shardName string,
 ) (ShardLike, func(), error) {
+	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: start [%s]\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: end [%s]\n", shardName, time.Now())
+	}()
+
 	i.shardLocks.RLock(shardName)
 	defer i.shardLocks.RUnlock(shardName)
+
+	fmt.Printf("  ==> [%s][%s] getOrInitLocalShardWithShutdownPrevention: rlocked [%s]\n", shardName, time.Now())
 
 	shard, err := i.getOrInitLocalShard(ctx, shardName)
 	if err != nil {
@@ -1713,8 +1735,15 @@ func (i *Index) getOrInitLocalShardWithShutdownPrevention(ctx context.Context, s
 }
 
 func (i *Index) getLocalShardWithShutdownPrevention(shardName string) (ShardLike, func(), error) {
+	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: start [%s]\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: end [%s]\n", shardName, time.Now())
+	}()
+
 	i.shardLocks.RLock(shardName)
 	defer i.shardLocks.RUnlock(shardName)
+
+	fmt.Printf("  ==> [%s][%s] getLocalShardWithShutdownPrevention: rlocked [%s]\n", shardName, time.Now())
 
 	shard := i.shards.Load(shardName)
 	if shard == nil {
@@ -1733,11 +1762,13 @@ func (i *Index) getLocalShardWithShutdownPrevention(shardName string) (ShardLike
 // Method first tries to get shard from Index::shards map,
 // or inits shard and adds it to the map if shard was not found
 func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (ShardLike, error) {
-	fmt.Printf("  ==> [%s] getOrInitLocalShard start\n", shardName)
-	defer fmt.Printf("  ==> [%s] getOrInitLocalShard defer\n", shardName)
+	fmt.Printf("  ==> [%s][%s] getOrInitLocalShard: start\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] getOrInitLocalShard: end\n", shardName, time.Now())
+	}()
 
 	if shard := i.shards.Load(shardName); shard != nil {
-		fmt.Printf("  ==> [%s] getOrInitLocalShard loaded\n", shardName)
+		fmt.Printf("  ==> [%s][%s] getOrInitLocalShard: loaded\n", shardName, time.Now())
 		return shard, nil
 	}
 
@@ -1747,22 +1778,29 @@ func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (Shar
 }
 
 func (i *Index) initLocalShard(ctx context.Context, shardName string, class *models.Class) (ShardLike, error) {
-	fmt.Printf("  ==> [%s] initLocalShard start\n", shardName)
-	defer fmt.Printf("  ==> [%s] initLocalShard defer\n", shardName)
+	fmt.Printf("  ==> [%s][%s] initLocalShard: start\n", shardName, time.Now())
+	defer func() {
+		fmt.Printf("  ==> [%s][%s] initLocalShard: end\n", shardName, time.Now())
+	}()
 
 	// make sure same shard is not inited in parallel
 	i.shardCreateLocks.Lock(shardName)
 	defer i.shardCreateLocks.Unlock(shardName)
 
+	fmt.Printf("  ==> [%s][%s] initLocalShard: locked\n", shardName, time.Now())
+
 	// check if created in the meantime by concurrent call
 	if shard := i.shards.Load(shardName); shard != nil {
-		fmt.Printf("  ==> [%s] initLocalShard loaded\n", shardName)
+		fmt.Printf("  ==> [%s][%s] initLocalShard loaded\n", shardName, time.Now())
 		return shard, nil
 	}
 
+	fmt.Printf("  ==> [%s][%s] initLocalShard: before init\n", shardName, time.Now())
 	if err := i.initAndStoreShard(ctx, shardName, class, i.metrics.baseMetrics); err != nil {
 		return nil, err
 	}
+	fmt.Printf("  ==> [%s][%s] initLocalShard: after init\n", shardName, time.Now())
+
 	return i.shards.Load(shardName), nil
 }
 
