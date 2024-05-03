@@ -302,7 +302,7 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 		// measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
 		// measurePerf(func() { res = getAllTenants_sort(ss.Physical, limit, after) })
 		// measurePerf(func() { res = getAllTenants_pq(ss.Physical, limit, after) })
-		measurePerf(func() { res = getAllTenants_ordered(ss.Physical, limit, after) })
+		measurePerf(func() { res = getAllTenants_btree(ss.Physical, limit, after) })
 		return nil
 	}
 	return res, meta.RLockGuard(f)
@@ -318,7 +318,7 @@ func getAllTenants_v0(shards map[string]sharding.Physical) []*models.Tenant {
 	return res
 }
 
-func getAllTenants_ordered(shards *btree.BTree, limit int, after string) []*models.Tenant {
+func getAllTenants_btree(shards *btree.BTree, limit int, after string) []*models.Tenant {
 	res := make([]*models.Tenant, 0, limit)
 	shards.AscendGreaterOrEqual(sharding.PocShard{Name: after}, func(item btree.Item) bool {
 		pocShard := item.(sharding.PocShard)

@@ -148,7 +148,7 @@ func InitState(id string, config config.Config, nodes nodes, replFactor int64, p
 		PartitioningEnabled: partitioningEnabled,
 	}
 	if partitioningEnabled {
-		out.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64)) // TODO play with these numbers, irl config
+		out.Physical = btree.New(1024) // TODO play with these numbers, irl config
 		return out, nil
 	}
 
@@ -279,7 +279,7 @@ func (s *State) initPhysical(nodes []string, replFactor int64) error {
 	}
 	it.SetStartNode(nodes[len(nodes)-1])
 
-	s.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	s.Physical = btree.New(1024)
 
 	nodeSet := make(map[string]bool)
 	for i := 0; i < s.Config.DesiredCount; i++ {
@@ -504,7 +504,7 @@ func generateShardName() string {
 func (s State) DeepCopy() State {
 	var virtualCopy []Virtual
 
-	physicalCopy := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	physicalCopy := btree.New(1024)
 	s.Physical.Ascend(func(item btree.Item) bool {
 		pocShard := item.(PocShard)
 		pocShard.Physical = pocShard.Physical.DeepCopy()

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	command "github.com/weaviate/weaviate/cluster/proto/api"
 	gproto "google.golang.org/protobuf/proto"
@@ -52,6 +53,7 @@ func (db *localDB) AddClass(cmd *command.ApplyRequest, nodeID string, schemaOnly
 		return fmt.Errorf("%w: parsing class: %w", errBadRequest, err)
 	}
 	req.State.SetLocalName(nodeID)
+	req.State.Physical = btree.New(1024)
 	return db.apply(
 		applyOp{
 			op:                    cmd.GetType().String(),

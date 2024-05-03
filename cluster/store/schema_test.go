@@ -93,7 +93,7 @@ func TestVersionedSchemaReaderClass(t *testing.T) {
 
 	// Add Simple class
 	cls1 := &models.Class{Class: "C"}
-	b := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	b := btree.New(1024)
 	b.ReplaceOrInsert(sharding.PocShard{Name: "S1", Physical: sharding.Physical{Status: "A"}})
 	b.ReplaceOrInsert(sharding.PocShard{Name: "S2", Physical: sharding.Physical{Status: "A", BelongsToNodes: nodes}})
 	ss1 := &sharding.State{Physical: b}
@@ -128,7 +128,7 @@ func TestVersionedSchemaReaderClass(t *testing.T) {
 
 	// Add MT Class
 	cls2 := &models.Class{Class: "D", MultiTenancyConfig: &models.MultiTenancyConfig{Enabled: true}}
-	bt := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	bt := btree.New(1024)
 	bt.ReplaceOrInsert(sharding.PocShard{Name: "S1", Physical: sharding.Physical{Status: "A", BelongsToNodes: nodes}})
 	ss2 := &sharding.State{
 		PartitioningEnabled: true,

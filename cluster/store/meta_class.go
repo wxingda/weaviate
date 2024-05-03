@@ -217,7 +217,6 @@ func (m *metaClass) AddTenants(nodeID string, req *command.AddTenantsRequest, re
 			continue
 		}
 		p := sharding.Physical{Name: t.Name, Status: t.Status, BelongsToNodes: part}
-		// NATEE0 nate0 {nate0 [] 0  [weaviate-1] HOT}
 		m.Sharding.Physical.ReplaceOrInsert(sharding.PocShard{Name: t.Name, Physical: p})
 		// TODO-RAFT: Check here why we set =nil if it is "owned by another node"
 		if !slices.Contains(part, nodeID) {

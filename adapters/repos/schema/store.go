@@ -354,7 +354,7 @@ func (r *store) Load(ctx context.Context) (ucs.State, error) {
 				cls.Class, len(data.ShardingState))
 		}
 		if n := len(data.Shards); n > 0 {
-			ss.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64))
+			ss.Physical = btree.New(1024)
 		}
 		for _, shard := range data.Shards {
 			phy := sharding.Physical{}
