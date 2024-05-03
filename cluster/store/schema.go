@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"github.com/google/uuid"
 	command "github.com/weaviate/weaviate/cluster/proto/api"
 	"github.com/weaviate/weaviate/entities/models"
 	entSchema "github.com/weaviate/weaviate/entities/schema"
@@ -293,7 +294,7 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 	// Read tenants using the meta lock guard
 	var res []*models.Tenant
 	limit := 50000
-	after := "/"
+	after := uuid.New().String()
 	f := func(_ *models.Class, ss *sharding.State) error {
 		if len(tenants) > 0 {
 			measurePerf(func() { res = getTenantsByNames(ss.Physical, tenants) })
@@ -327,10 +328,7 @@ func getAllTenants_btree(shards *btree.BTree, limit int, after string) []*models
 			return true
 		}
 		res = append(res, makeTenant(name, entSchema.ActivityStatus(pocShard.Physical.Status)))
-		if len(res) >= limit {
-			return false
-		}
-		return true
+		return len(res) < limit
 	})
 	return res
 }
@@ -486,8 +484,10 @@ func measurePerf(f func()) {
 	memAllocDiff := memAfter.Alloc - memBefore.Alloc
 	memTotalAllocDiff := memAfter.TotalAlloc - memBefore.TotalAlloc
 	timeDiffNano := timeAfter.UnixNano() - timeBefore.UnixNano()
-	fmt.Println("MEASUREPERF:MEMALLOC:", memAllocDiff)
-	fmt.Println("MEASUREPERF:MEMTOTALALLOC:", memTotalAllocDiff)
+	fmt.Println("MEASUREPERF:MEMALLOC:", memAfter.Alloc)
+	fmt.Println("MEASUREPERF:MEMTOTALALLOC:", memAfter.TotalAlloc)
+	fmt.Println("MEASUREPERF:MEMALLOCDIFF:", memAllocDiff)
+	fmt.Println("MEASUREPERF:MEMTOTALALLOCDIFF:", memTotalAllocDiff)
 	fmt.Println("MEASUREPERF:TIMEDIFFNS:", timeDiffNano)
 }
 
