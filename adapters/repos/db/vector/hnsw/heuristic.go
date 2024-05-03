@@ -141,9 +141,6 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 		return nil
 	}
 
-	// TODO, if this solution stays we might need something with fewer allocs
-	ids := make([]uint64, 0, input.Len())
-
 	closestFirst := h.pools.pqHeuristic.GetMin(input.Len())
 	defer h.pools.pqHeuristic.Put(closestFirst)
 
@@ -152,7 +149,6 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 		elem := input.Pop()
 		if denyList == nil || !denyList.Contains(elem.ID) {
 			closestFirst.InsertWithValue(elem.ID, elem.Dist, i)
-			ids = append(ids, elem.ID)
 			i++
 		}
 	}
@@ -161,7 +157,7 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 	returnList = h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
 
 	// Keep the first MBeta candidates
-	for i := 0; i < h.acornMBeta && closestFirst.Len() > 0; i++ {
+	for i := 0; i < h.acornMBeta; i++ {
 		elem := closestFirst.Pop()
 		returnList = append(returnList, elem)
 	}
@@ -182,6 +178,10 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 			} else {
 				log.Printf("Node %d: Neighbor not found for ID: %d", node.id, curr.ID)
 			}
+		}
+		if len(twoHopNeighborhood)+len(returnList) > h.maximumConnections*h.acornGamma {
+			// this is in the paper, not sure when this would be encountered
+			break
 		}
 	}
 

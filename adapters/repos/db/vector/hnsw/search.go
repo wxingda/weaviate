@@ -1147,9 +1147,21 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 					neighborNode := h.nodes[neighborID]
 					if neighborNode != nil {
 						//neighborNode.RLock()
-						for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
-							if allowList.Contains(neighborOfNeighborID) {
-								neighbors = append(neighbors, neighborOfNeighborID)
+						// Workaround, the first ~150 (multi-threading) nodes cannot have >MBeta neighbors
+						fmt.Printf("At neighborID: %d \n", neighborID)
+						fmt.Printf("NeighborID: %d has %d connections", neighborID, len(h.nodes[neighborID].connections[level]))
+						if neighborID > 200 {
+							for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level][h.acornMBeta:] {
+								if allowList.Contains(neighborOfNeighborID) {
+									neighbors = append(neighbors, neighborOfNeighborID)
+								}
+							}
+						} else {
+							// just check all neighbors
+							for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
+								if allowList.Contains(neighborOfNeighborID) {
+									neighbors = append(neighbors, neighborOfNeighborID)
+								}
 							}
 						}
 						//neighborNode.RUnlock()
@@ -1163,7 +1175,7 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 				}
 			}
 		}
-		neighbors = neighbors[:min(len(neighbors), h.maximumConnections)]
+		neighbors = neighbors[:min(len(neighbors), len(connectionsReusable))]
 		connectionsReusable = connectionsReusable[:len(neighbors)]
 
 		copy(connectionsReusable, neighbors)

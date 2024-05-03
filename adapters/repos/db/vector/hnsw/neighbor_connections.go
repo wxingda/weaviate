@@ -13,6 +13,7 @@ package hnsw
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -84,7 +85,7 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	}
 
 	results, err := n.graph.searchLayerByVector(n.nodeVec, eps, efConstruction,
-		level, nil)
+		level, nil) // This might also change with ACORN, to truncate the neighbors to the first M, see 5.2
 	if err != nil {
 		return errors.Wrapf(err, "search layer at level %d", level)
 	}
@@ -93,12 +94,17 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	before = time.Now()
 
 	max := n.maximumConnections(level)
-	if level == 0 && n.graph.acorn {
+
+	// ACORN seems to not prune on layers > 0 at all, that does not work in this implementation.
+	if n.graph.acorn && level == 0 {
 		max *= n.graph.acornGamma
 		if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
 			return errors.Wrap(err, "acorn heuristic")
 		}
-		// fmt.Printf("%d Neighbors after Pruning\n", results.Len())
+		if results.Len() < n.graph.acornMBeta {
+			fmt.Print("HERE FOUND ONE!!")
+		}
+		//fmt.Printf("Node id %d has %d Neighbors after Pruning\n", n.node.id, results.Len())
 	} else {
 		if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
 			return errors.Wrap(err, "heuristic")
