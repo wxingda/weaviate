@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -124,15 +125,18 @@ func TestFileStructureMigration(t *testing.T) {
 				}},
 			}
 			states[class] = &sharding.State{
-				Physical: make(map[string]sharding.Physical),
+				Physical: btree.New(1024),
 			}
 			states[class].SetLocalName(localNode)
 
 			for _, shard := range shards {
-				states[class].Physical[shard] = sharding.Physical{
-					Name:           shard,
-					BelongsToNodes: []string{localNode},
-				}
+				states[class].Physical.ReplaceOrInsert(sharding.PocShard{
+					Name: shard,
+					Physical: sharding.Physical{
+						Name:           shard,
+						BelongsToNodes: []string{localNode},
+					},
+				})
 			}
 
 			i++

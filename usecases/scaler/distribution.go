@@ -14,6 +14,7 @@ package scaler
 import (
 	"fmt"
 
+	"github.com/google/btree"
 	"github.com/weaviate/weaviate/usecases/sharding"
 )
 
@@ -26,14 +27,17 @@ type (
 
 // distributions returns shard distribution for local node as well as remote nodes
 func distributions(before, after *sharding.State) (ShardDist, nodeShardDist) {
-	localDist := make(ShardDist, len(before.Physical))
+	localDist := make(ShardDist, before.Physical.Len())
 	nodeDist := make(map[string]ShardDist)
-	for name := range before.Physical {
-		newNodes := difference(after.Physical[name].BelongsToNodes, before.Physical[name].BelongsToNodes)
+	before.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		name := pocShard.Name
+		physical := pocShard.Physical
+		newNodes := difference(after.Physical.Get(sharding.PocShard{Name: name}).(sharding.PocShard).Physical.BelongsToNodes, physical.BelongsToNodes)
 		if before.IsLocalShard(name) {
 			localDist[name] = newNodes
 		} else {
-			belongsTo := before.Physical[name].BelongsToNode()
+			belongsTo := physical.BelongsToNode()
 			dist := nodeDist[belongsTo]
 			if dist == nil {
 				dist = make(map[string][]string)
@@ -41,7 +45,8 @@ func distributions(before, after *sharding.State) (ShardDist, nodeShardDist) {
 			}
 			dist[name] = newNodes
 		}
-	}
+		return true
+	})
 	return localDist, nodeDist
 }
 

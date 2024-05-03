@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -104,7 +105,14 @@ func TestServiceEndpoints(t *testing.T) {
 		Class:              "C",
 		MultiTenancyConfig: &models.MultiTenancyConfig{Enabled: true},
 	}
-	ss := &sharding.State{PartitioningEnabled: true, Physical: map[string]sharding.Physical{"T0": {Name: "T0"}}}
+	b := btree.New(1024)
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "T0",
+		Physical: sharding.Physical{
+			Name: "T0",
+		},
+	})
+	ss := &sharding.State{PartitioningEnabled: true, Physical: b}
 	version0, err := srv.AddClass(cls, ss)
 	assert.Nil(t, err)
 	assert.Equal(t, schema.ClassEqual("C"), "C")
@@ -168,7 +176,15 @@ func TestServiceEndpoints(t *testing.T) {
 
 	// QueryShardOwner
 	mc := srv.SchemaReader().metaClass(cls.Class)
-	mc.Sharding = sharding.State{Physical: map[string]sharding.Physical{"T0": {BelongsToNodes: []string{"N0"}}}}
+	b2 := btree.New(1024)
+	b2.ReplaceOrInsert(sharding.PocShard{
+		Name: "T0",
+		Physical: sharding.Physical{
+			Name:           "T0",
+			BelongsToNodes: []string{"N0"},
+		},
+	})
+	mc.Sharding = sharding.State{Physical: b2}
 	getShardOwner, _, err := srv.QueryShardOwner(cls.Class, "T0")
 	assert.Nil(t, err)
 	assert.Equal(t, "N0", getShardOwner)
@@ -184,7 +200,14 @@ func TestServiceEndpoints(t *testing.T) {
 	assert.ErrorIs(t, err, errBadRequest)
 	cls.MultiTenancyConfig = &models.MultiTenancyConfig{Enabled: true}
 	cls.ReplicationConfig = &models.ReplicationConfig{Factor: 1}
-	ss.Physical = map[string]sharding.Physical{"T0": {Name: "T0"}}
+	b3 := btree.New(1024)
+	b3.ReplaceOrInsert(sharding.PocShard{
+		Name: "T0",
+		Physical: sharding.Physical{
+			Name: "T0",
+		},
+	})
+	ss.Physical = b3
 	version, err := srv.UpdateClass(cls, nil)
 	info.ClassVersion = version
 	info.ShardVersion = version0
@@ -254,7 +277,8 @@ func TestServiceEndpoints(t *testing.T) {
 	info.Tenants -= 1
 	info.ShardVersion = version
 	assert.Equal(t, info, schema.ClassInfo("C"))
-	assert.Equal(t, "S2", schema.CopyShardingState("C").Physical["T2"].Status)
+	status := schema.CopyShardingState("C").Physical.Get(sharding.PocShard{Name: "T2"}).(sharding.PocShard).Physical.Status
+	assert.Equal(t, "S2", status)
 
 	// Self Join
 	assert.Nil(t, srv.Join(ctx, m.store.nodeID, addr, true))
@@ -371,13 +395,63 @@ func TestStoreApply(t *testing.T) {
 	}
 
 	cls := &models.Class{Class: "C1", MultiTenancyConfig: &models.MultiTenancyConfig{Enabled: true}}
-	ss := &sharding.State{Physical: map[string]sharding.Physical{"T1": {
-		Name:           "T1",
-		BelongsToNodes: []string{"THIS"},
-	}, "T2": {
-		Name:           "T2",
-		BelongsToNodes: []string{"THIS"},
-	}}}
+	b := btree.New(1024)
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "T1",
+		Physical: sharding.Physical{
+			Name:           "T1",
+			BelongsToNodes: []string{"THIS"},
+		},
+	})
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "T2",
+		Physical: sharding.Physical{
+			Name:           "T2",
+			BelongsToNodes: []string{"THIS"},
+		},
+	})
+	b2 := btree.New(1024)
+	// map[string]sharding.Physical{"T1": {}},
+	b2.ReplaceOrInsert(sharding.PocShard{
+		Name: "T1",
+		Physical: sharding.Physical{
+			Name: "T1",
+		},
+	})
+	b3 := btree.New(1024)
+	b4 := btree.New(1024)
+	b4.ReplaceOrInsert(sharding.PocShard{
+		Name: "T1",
+		Physical: sharding.Physical{
+			Name:           "T1",
+			BelongsToNodes: []string{"THIS"},
+			Status:         models.TenantActivityStatusHOT,
+		},
+	})
+	b4.ReplaceOrInsert(sharding.PocShard{
+		Name: "T2",
+		Physical: sharding.Physical{
+			Name:           "T2",
+			BelongsToNodes: []string{"THIS"},
+			Status:         models.TenantActivityStatusCOLD,
+		},
+	})
+	b4.ReplaceOrInsert(sharding.PocShard{
+		Name: "T3",
+		Physical: sharding.Physical{
+			Name:           "T3",
+			BelongsToNodes: []string{"THIS"},
+			Status:         models.TenantActivityStatusHOT,
+		},
+	})
+
+	b5 := btree.New(1024)
+	b5.ReplaceOrInsert(sharding.PocShard{
+		Name:     "T1",
+		Physical: sharding.Physical{},
+	})
+
+	ss := &sharding.State{Physical: b}
 
 	tests := []struct {
 		name     string
@@ -634,11 +708,11 @@ func TestStoreApply(t *testing.T) {
 			doBefore: func(m *MockStore) {
 				m.indexer.On("Open", mock.Anything).Return(nil)
 				m.store.db.Schema.addClass(cls, &sharding.State{
-					Physical: map[string]sharding.Physical{"T1": {}},
+					Physical: b2,
 				}, 1)
 			},
 			doAfter: func(ms *MockStore) error {
-				if _, ok := ms.store.db.Schema.Classes["C1"].Sharding.Physical["T1"]; !ok {
+				if !ms.store.db.Schema.Classes["C1"].Sharding.Physical.Has(sharding.PocShard{Name: "T1"}) {
 					return fmt.Errorf("tenant is missing")
 				}
 				return nil
@@ -665,7 +739,7 @@ func TestStoreApply(t *testing.T) {
 				}})},
 			resp: Response{Error: errSchema},
 			doBefore: func(m *MockStore) {
-				ss := &sharding.State{Physical: map[string]sharding.Physical{}}
+				ss := &sharding.State{Physical: b3}
 				doFirst(m)
 				m.store.db.Schema.addClass(cls, ss, 1)
 			},
@@ -680,19 +754,7 @@ func TestStoreApply(t *testing.T) {
 				}})},
 			resp: Response{Error: nil},
 			doBefore: func(m *MockStore) {
-				ss := &sharding.State{Physical: map[string]sharding.Physical{"T1": {
-					Name:           "T1",
-					BelongsToNodes: []string{"THIS"},
-					Status:         models.TenantActivityStatusHOT,
-				}, "T2": {
-					Name:           "T2",
-					BelongsToNodes: []string{"THIS"},
-					Status:         models.TenantActivityStatusCOLD,
-				}, "T3": {
-					Name:           "T3",
-					BelongsToNodes: []string{"NODE-2"},
-					Status:         models.TenantActivityStatusHOT,
-				}}}
+				ss := &sharding.State{Physical: b4}
 				m.indexer.On("Open", mock.Anything).Return(nil)
 				m.store.db.Schema.addClass(cls, ss, 1)
 			},
@@ -737,10 +799,10 @@ func TestStoreApply(t *testing.T) {
 			resp: Response{Error: nil},
 			doBefore: func(m *MockStore) {
 				m.indexer.On("Open", mock.Anything).Return(nil)
-				m.store.db.Schema.addClass(cls, &sharding.State{Physical: map[string]sharding.Physical{"T1": {}}}, 1)
+				m.store.db.Schema.addClass(cls, &sharding.State{Physical: b5}, 1)
 			},
 			doAfter: func(ms *MockStore) error {
-				if len(ms.store.db.Schema.Classes["C1"].Sharding.Physical) != 0 {
+				if ms.store.db.Schema.Classes["C1"].Sharding.Physical.Len() != 0 {
 					return fmt.Errorf("sharding state mus be empty after deletion")
 				}
 				return nil

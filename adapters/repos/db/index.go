@@ -301,7 +301,10 @@ func (i *Index) initAndStoreShards(ctx context.Context, shardState *sharding.Sta
 		eg.SetLimit(_NUMCPU)
 
 		for _, shardName := range shardState.AllLocalPhysicalShards() {
-			physical := shardState.Physical[shardName]
+			// TODO replace all PocShard with no Physical if not needed?
+			item := shardState.Physical.Get(sharding.PocShard{Name: shardName})
+			pocShard := item.(sharding.PocShard)
+			physical := pocShard.Physical
 			if physical.ActivityStatus() != models.TenantActivityStatusHOT {
 				// do not instantiate inactive shard
 				continue
@@ -328,7 +331,7 @@ func (i *Index) initAndStoreShards(ctx context.Context, shardState *sharding.Sta
 	}
 
 	for _, shardName := range shardState.AllLocalPhysicalShards() {
-		physical := shardState.Physical[shardName]
+		physical := shardState.Physical.Get(sharding.PocShard{Name: shardName}).(sharding.PocShard).Physical
 		if physical.ActivityStatus() != models.TenantActivityStatusHOT {
 			// do not instantiate inactive shard
 			continue

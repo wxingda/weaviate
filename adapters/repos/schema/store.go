@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	clusterStore "github.com/weaviate/weaviate/cluster/store"
 	enterrors "github.com/weaviate/weaviate/entities/errors"
@@ -353,7 +354,7 @@ func (r *store) Load(ctx context.Context) (ucs.State, error) {
 				cls.Class, len(data.ShardingState))
 		}
 		if n := len(data.Shards); n > 0 {
-			ss.Physical = make(map[string]sharding.Physical, n)
+			ss.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64))
 		}
 		for _, shard := range data.Shards {
 			phy := sharding.Physical{}
@@ -361,7 +362,7 @@ func (r *store) Load(ctx context.Context) (ucs.State, error) {
 			if err := json.Unmarshal(shard.Value, &phy); err != nil {
 				return state, fmt.Errorf("unmarshal shard %q for class %q", name, cls.Class)
 			}
-			ss.Physical[name] = phy
+			ss.Physical.ReplaceOrInsert(sharding.PocShard{Name: name, Physical: phy})
 		}
 		state.ObjectSchema.Classes = append(state.ObjectSchema.Classes, &cls)
 		state.ShardingState[cls.Class] = &ss
@@ -579,15 +580,24 @@ func createClassPayload(class *models.Class,
 	}
 	if shardingState != nil {
 		ss := *shardingState
-		pl.Shards = make([]schema.KeyValuePair, len(ss.Physical))
+		pl.Shards = make([]schema.KeyValuePair, ss.Physical.Len())
 		i := 0
-		for name, shard := range ss.Physical {
+		var err error = nil
+		ss.Physical.Ascend(func(item btree.Item) bool {
+			pocShard := item.(sharding.PocShard)
+			name := pocShard.Name
+			shard := pocShard.Physical
 			data, err := json.Marshal(shard)
 			if err != nil {
-				return pl, fmt.Errorf("marshal shard %q metadata: %w", name, err)
+				err = fmt.Errorf("marshal shard %q metadata: %w", name, err)
+				return false
 			}
 			pl.Shards[i] = schema.KeyValuePair{Key: name, Value: data}
 			i++
+			return true
+		})
+		if err != nil {
+			return pl, err
 		}
 		ss.Physical = nil
 		if pl.ShardingState, err = json.Marshal(&ss); err != nil {

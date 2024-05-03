@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"sort"
 
+	"github.com/google/btree"
 	"github.com/spaolacci/murmur3"
 	"github.com/weaviate/weaviate/entities/schema"
 	"github.com/weaviate/weaviate/usecases/cluster"
@@ -25,12 +26,22 @@ import (
 
 const shardNameLength = 12
 
+type PocShard struct {
+	Name     string
+	Physical Physical
+}
+
+// TODO pointer type?
+func (s PocShard) Less(than btree.Item) bool {
+	return s.Name < than.(PocShard).Name
+}
+
 type State struct {
-	IndexID             string              `json:"indexID"` // for monitoring, reporting purposes. Does not influence the shard-calculations
-	Config              config.Config       `json:"config"`
-	Physical            map[string]Physical `json:"physical"`
-	Virtual             []Virtual           `json:"virtual"`
-	PartitioningEnabled bool                `json:"partitioningEnabled"`
+	IndexID             string        `json:"indexID"` // for monitoring, reporting purposes. Does not influence the shard-calculations
+	Config              config.Config `json:"config"`
+	Physical            *btree.BTree  `json:"physical"`
+	Virtual             []Virtual     `json:"virtual"`
+	PartitioningEnabled bool          `json:"partitioningEnabled"`
 
 	// different for each node, not to be serialized
 	localNodeName string // TODO: localNodeName is static it is better to store just once
@@ -40,15 +51,17 @@ type State struct {
 // migrates it into the new format for backward-compatibility with all classes
 // created before v1.17
 func (s *State) MigrateFromOldFormat() {
-	for shardName, shard := range s.Physical {
-		if shard.LegacyBelongsToNodeForBackwardCompat != "" && len(shard.BelongsToNodes) == 0 {
-			shard.BelongsToNodes = []string{
-				shard.LegacyBelongsToNodeForBackwardCompat,
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		if pocShard.Physical.LegacyBelongsToNodeForBackwardCompat != "" && len(pocShard.Physical.BelongsToNodes) == 0 {
+			pocShard.Physical.BelongsToNodes = []string{
+				pocShard.Physical.LegacyBelongsToNodeForBackwardCompat,
 			}
-			shard.LegacyBelongsToNodeForBackwardCompat = ""
+			pocShard.Physical.LegacyBelongsToNodeForBackwardCompat = ""
 		}
-		s.Physical[shardName] = shard
-	}
+		s.Physical.ReplaceOrInsert(PocShard{pocShard.Name, pocShard.Physical})
+		return true
+	})
 }
 
 type Virtual struct {
@@ -135,7 +148,7 @@ func InitState(id string, config config.Config, nodes nodes, replFactor int64, p
 		PartitioningEnabled: partitioningEnabled,
 	}
 	if partitioningEnabled {
-		out.Physical = make(map[string]Physical, 128)
+		out.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64)) // TODO play with these numbers, irl config
 		return out, nil
 	}
 
@@ -156,8 +169,8 @@ func InitState(id string, config config.Config, nodes nodes, replFactor int64, p
 // Shard returns the shard name if it exits and empty string otherwise
 func (s *State) Shard(partitionKey, objectID string) string {
 	if s.PartitioningEnabled {
-		if _, ok := s.Physical[partitionKey]; ok {
-			return partitionKey // will change in the future
+		if s.Physical.Has(PocShard{partitionKey, Physical{}}) {
+			return partitionKey
 		}
 		return ""
 	}
@@ -165,7 +178,7 @@ func (s *State) Shard(partitionKey, objectID string) string {
 }
 
 func (s *State) PhysicalShard(in []byte) string {
-	if len(s.Physical) == 0 {
+	if s.Physical.Len() == 0 {
 		panic("no physical shards present")
 	}
 
@@ -184,14 +197,16 @@ func (s *State) PhysicalShard(in []byte) string {
 
 // CountPhysicalShards return a count of physical shards
 func (s *State) CountPhysicalShards() int {
-	return len(s.Physical)
+	return s.Physical.Len()
 }
 
 func (s *State) AllPhysicalShards() []string {
 	var names []string
-	for _, physical := range s.Physical {
-		names = append(names, physical.Name)
-	}
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		names = append(names, pocShard.Name)
+		return true
+	})
 
 	sort.Slice(names, func(a, b int) bool {
 		return names[a] < names[b]
@@ -202,11 +217,13 @@ func (s *State) AllPhysicalShards() []string {
 
 func (s *State) AllLocalPhysicalShards() []string {
 	var names []string
-	for _, physical := range s.Physical {
-		if s.IsLocalShard(physical.Name) {
-			names = append(names, physical.Name)
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		if s.IsLocalShard(pocShard.Name) {
+			names = append(names, pocShard.Name)
 		}
-	}
+		return true
+	})
 
 	sort.Slice(names, func(a, b int) bool {
 		return names[a] < names[b]
@@ -220,9 +237,12 @@ func (s *State) SetLocalName(name string) {
 }
 
 func (s *State) IsLocalShard(name string) bool {
-	for _, node := range s.Physical[name].BelongsToNodes {
-		if node == s.localNodeName {
-			return true
+	if item := s.Physical.Get(PocShard{Name: name, Physical: Physical{}}); item != nil {
+		pocShard := item.(PocShard)
+		for _, node := range pocShard.Physical.BelongsToNodes {
+			if node == s.localNodeName {
+				return true
+			}
 		}
 	}
 
@@ -259,7 +279,7 @@ func (s *State) initPhysical(nodes []string, replFactor int64) error {
 	}
 	it.SetStartNode(nodes[len(nodes)-1])
 
-	s.Physical = map[string]Physical{}
+	s.Physical = btree.NewWithFreeList(1024, btree.NewFreeList(64))
 
 	nodeSet := make(map[string]bool)
 	for i := 0; i < s.Config.DesiredCount; i++ {
@@ -284,7 +304,7 @@ func (s *State) initPhysical(nodes []string, replFactor int64) error {
 			shard.BelongsToNodes = append(shard.BelongsToNodes, it.Next())
 		}
 
-		s.Physical[name] = shard
+		s.Physical.ReplaceOrInsert(PocShard{Name: name, Physical: shard})
 	}
 
 	return nil
@@ -309,7 +329,7 @@ func (s State) GetPartitions(nodes []string, shards []string, replFactor int64) 
 	partitions := make(map[string][]string, len(shards))
 	nodeSet := make(map[string]bool)
 	for _, name := range shards {
-		if _, alreadyExists := s.Physical[name]; alreadyExists {
+		if s.Physical.Has(PocShard{Name: name, Physical: Physical{}}) {
 			continue
 		}
 		owners := make([]string, 0, replFactor)
@@ -345,13 +365,13 @@ func (s *State) AddPartition(name string, nodes []string, status string) Physica
 		OwnsPercentage: 1.0,
 		Status:         status,
 	}
-	s.Physical[name] = p
+	s.Physical.ReplaceOrInsert(PocShard{Name: name, Physical: p})
 	return p
 }
 
 // DeletePartition to physical shards
 func (s *State) DeletePartition(name string) {
-	delete(s.Physical, name)
+	s.Physical.Delete(PocShard{Name: name, Physical: Physical{}})
 }
 
 // ApplyNodeMapping replaces node names with their new value form nodeMapping in s.
@@ -361,7 +381,11 @@ func (s *State) ApplyNodeMapping(nodeMapping map[string]string) {
 		return
 	}
 
-	for k, v := range s.Physical {
+	// for k, v := range s.Physical {
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		v := pocShard.Physical
+
 		if v.LegacyBelongsToNodeForBackwardCompat != "" {
 			if newNodeName, ok := nodeMapping[v.LegacyBelongsToNodeForBackwardCompat]; ok {
 				v.LegacyBelongsToNodeForBackwardCompat = newNodeName
@@ -374,8 +398,11 @@ func (s *State) ApplyNodeMapping(nodeMapping map[string]string) {
 			}
 		}
 
-		s.Physical[k] = v
-	}
+		// TODO does this actually work or since it's not a pointer does it break?
+		pocShard.Physical = v
+
+		return true
+	})
 }
 
 func (s *State) initVirtual() {
@@ -418,20 +445,24 @@ func (s *State) distributeVirtualAmongPhysical() {
 		ids[a], ids[b] = ids[b], ids[a]
 	})
 
-	physicalIDs := make([]string, 0, len(s.Physical))
-	for name := range s.Physical {
-		physicalIDs = append(physicalIDs, name)
-	}
+	physicalIDs := make([]string, 0, s.Physical.Len())
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		physicalIDs = append(physicalIDs, pocShard.Name)
+		return true
+	})
 
 	for i, vid := range ids {
 		pickedPhysical := physicalIDs[i%len(physicalIDs)]
 
 		virtual := s.virtualByName(vid)
 		virtual.AssignedToPhysical = pickedPhysical
-		physical := s.Physical[pickedPhysical]
-		physical.OwnsVirtual = append(physical.OwnsVirtual, vid)
-		physical.OwnsPercentage += virtual.OwnsPercentage
-		s.Physical[pickedPhysical] = physical
+		item := s.Physical.Get(PocShard{Name: pickedPhysical, Physical: Physical{}})
+		pocShard := item.(PocShard)
+		pocShard.Physical.OwnsVirtual = append(pocShard.Physical.OwnsVirtual, vid)
+		pocShard.Physical.OwnsPercentage += virtual.OwnsPercentage
+		// TODO is this needed or is modify reflected?
+		s.Physical.ReplaceOrInsert(PocShard{Name: pickedPhysical, Physical: pocShard.Physical})
 	}
 }
 
@@ -473,10 +504,13 @@ func generateShardName() string {
 func (s State) DeepCopy() State {
 	var virtualCopy []Virtual
 
-	physicalCopy := make(map[string]Physical, len(s.Physical))
-	for name, shard := range s.Physical {
-		physicalCopy[name] = shard.DeepCopy()
-	}
+	physicalCopy := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	s.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(PocShard)
+		pocShard.Physical = pocShard.Physical.DeepCopy()
+		physicalCopy.ReplaceOrInsert(pocShard)
+		return true
+	})
 
 	if len(s.Virtual) > 0 {
 		virtualCopy = make([]Virtual, len(s.Virtual))

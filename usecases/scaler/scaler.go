@@ -18,6 +18,7 @@ import (
 
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
+	"github.com/google/btree"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -136,11 +137,20 @@ func (s *Scaler) scaleOut(ctx context.Context, className string, ssBefore *shard
 
 	// Identify all shards of the class and adjust the replicas. After this is
 	// done, the affected shards now belong to more nodes than they did before.
-	for name, shard := range ssAfter.Physical {
+	var err error = nil
+	ssAfter.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		name := pocShard.Name
+		shard := pocShard.Physical
 		if err := shard.AdjustReplicas(int(replFactor), s.cluster); err != nil {
-			return nil, err
+			err = err
+			return false
 		}
-		ssAfter.Physical[name] = shard
+		ssAfter.Physical.ReplaceOrInsert(sharding.PocShard{Name: name, Physical: shard})
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
 	lDist, nodeDist := distributions(ssBefore, &ssAfter)
 	g, ctx := enterrors.NewErrorGroupWithContextWrapper(s.logger, ctx)

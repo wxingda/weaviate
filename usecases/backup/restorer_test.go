@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/weaviate/weaviate/entities/backup"
@@ -287,12 +288,17 @@ func TestManagerRestoreBackup(t *testing.T) {
 		path        = "bucket/backups/" + nodeHome
 	)
 
-	rawShardingStateBytes, _ := json.Marshal(&sharding.State{
-		IndexID: cls,
-		Physical: map[string]sharding.Physical{"cT9eTErXgmTX": {
+	b := btree.New(1024)
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "cT9eTErXgmTX",
+		Physical: sharding.Physical{
 			Name:           "cT9eTErXgmTX",
 			BelongsToNodes: []string{nodeName},
-		}},
+		},
+	})
+	rawShardingStateBytes, _ := json.Marshal(&sharding.State{
+		IndexID:  cls,
+		Physical: b,
 	})
 	rawClassBytes, _ := json.Marshal(&models.Class{
 		Class: cls,
@@ -515,12 +521,17 @@ func TestManagerCoordinatedRestore(t *testing.T) {
 			Duration: time.Millisecond * 20,
 		}
 	)
-	rawShardingStateBytes, _ := json.Marshal(&sharding.State{
-		IndexID: cls,
-		Physical: map[string]sharding.Physical{"cT9eTErXgmTX": {
+	b := btree.New(1024)
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "cT9eTErXgmTX",
+		Physical: sharding.Physical{
 			Name:           "cT9eTErXgmTX",
 			BelongsToNodes: []string{nodeName},
-		}},
+		},
+	})
+	rawShardingStateBytes, _ := json.Marshal(&sharding.State{
+		IndexID:  cls,
+		Physical: b,
 	})
 	rawClassBytes, _ := json.Marshal(&models.Class{
 		Class: cls,

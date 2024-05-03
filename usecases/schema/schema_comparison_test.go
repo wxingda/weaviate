@@ -14,6 +14,7 @@ package schema
 import (
 	"testing"
 
+	"github.com/google/btree"
 	"github.com/stretchr/testify/assert"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
@@ -109,22 +110,28 @@ func Test_SchemaComparison_MismatchInClasses(t *testing.T) {
 }
 
 func Test_SchemaComparison_VariousMismatches(t *testing.T) {
+	b1 := btree.New(1024)
+	b1.ReplaceOrInsert(sharding.PocShard{
+		Name: "abcd",
+		Physical: sharding.Physical{
+			Name:        "abcd",
+			OwnsVirtual: []string{"v1"},
+		},
+	})
+	b2 := btree.New(1024)
+	b2.ReplaceOrInsert(sharding.PocShard{
+		Name: "abcd",
+	})
 	left := &State{
 		ShardingState: map[string]*sharding.State{
 			"Foo": {
 				IndexID: "Foo",
 			},
 			"Foo2": {
-				Physical: map[string]sharding.Physical{
-					"abcd": {
-						OwnsVirtual: []string{"v1"},
-					},
-				},
+				Physical: b1,
 			},
 			"Foo4": {
-				Physical: map[string]sharding.Physical{
-					"abcd": {},
-				},
+				Physical: b2,
 			},
 		},
 
@@ -170,22 +177,28 @@ func Test_SchemaComparison_VariousMismatches(t *testing.T) {
 		},
 	}
 
+	b3 := btree.New(1024)
+	b3.ReplaceOrInsert(sharding.PocShard{
+		Name: "xyz",
+		Physical: sharding.Physical{
+			Name:        "xyz",
+			OwnsVirtual: []string{"n1"},
+		},
+	})
+	b4 := btree.New(1024)
+	b4.ReplaceOrInsert(sharding.PocShard{
+		Name: "abcd",
+	})
 	right := &State{
 		ShardingState: map[string]*sharding.State{
 			"Foo": {
 				IndexID: "Foo",
 			},
 			"Foo2": {
-				Physical: map[string]sharding.Physical{
-					"xyz": {
-						BelongsToNodes: []string{"n1"},
-					},
-				},
+				Physical: b3,
 			},
 			"Foo3": {
-				Physical: map[string]sharding.Physical{
-					"abcd": {},
-				},
+				Physical: b4,
 			},
 		},
 

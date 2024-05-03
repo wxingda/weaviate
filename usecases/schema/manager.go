@@ -17,6 +17,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
@@ -117,21 +118,31 @@ func (s State) EqualEnough(other *State) bool {
 		}
 
 		// Same number of physical shards
-		eqPhysLen := len(ss1ss.Physical) == len(ss2ss.Physical)
+		eqPhysLen := ss1ss.Physical.Len() == ss2ss.Physical.Len()
 		if !eqPhysLen {
 			return false
 		}
 
-		for shard, ss1phys := range ss1ss.Physical {
+		returnEarly := false
+		ss1ss.Physical.Ascend(func(item btree.Item) bool {
+			pocShard := item.(sharding.PocShard)
+			shard := pocShard.Name
+			ss1phys := pocShard.Physical
 			// Same physical shard contents and status
-			ss2phys, ok := ss2ss.Physical[shard]
-			if !ok {
+			ss2phys := ss2ss.Physical.Get(sharding.PocShard{Name: shard})
+			if ss2phys == nil {
+				returnEarly = true
 				return false
 			}
-			eqActivStat := ss1phys.ActivityStatus() == ss2phys.ActivityStatus()
+			eqActivStat := ss1phys.ActivityStatus() == ss2phys.(sharding.PocShard).Physical.Status
 			if !eqActivStat {
+				returnEarly = true
 				return false
 			}
+			return true
+		})
+		if returnEarly {
+			return false
 		}
 	}
 
@@ -389,13 +400,14 @@ func (m *Manager) OptimisticTenantStatus(class string, tenant string) (map[strin
 	var foundTenant bool
 	var status string
 	err := m.metaReader.Read(class, func(_ *models.Class, ss *sharding.State) error {
-		t, ok := ss.Physical[tenant]
-		if !ok {
+		item := ss.Physical.Get(sharding.PocShard{Name: tenant})
+		if item == nil {
 			return nil
 		}
+		t := item.(sharding.PocShard)
 
 		foundTenant = true
-		status = t.Status
+		status = t.Physical.Status
 		return nil
 	})
 	if err != nil {

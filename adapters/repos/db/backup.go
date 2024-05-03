@@ -17,12 +17,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
 	enterrors "github.com/weaviate/weaviate/entities/errors"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/backup"
 	"github.com/weaviate/weaviate/entities/schema"
+	"github.com/weaviate/weaviate/usecases/sharding"
 )
 
 type BackupState struct {
@@ -163,15 +165,17 @@ func (db *DB) Shards(ctx context.Context, class string) ([]string, error) {
 	unique := make(map[string]struct{})
 
 	ss := db.schemaGetter.CopyShardingState(class)
-	if len(ss.Physical) == 0 {
+	if ss.Physical.Len() == 0 {
 		return []string{}, nil
 	}
 
-	for _, shard := range ss.Physical {
-		for _, node := range shard.BelongsToNodes {
+	ss.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		for _, node := range pocShard.Physical.BelongsToNodes {
 			unique[node] = struct{}{}
 		}
-	}
+		return true
+	})
 
 	var (
 		nodes   = make([]string, len(unique))
@@ -183,7 +187,7 @@ func (db *DB) Shards(ctx context.Context, class string) ([]string, error) {
 		counter++
 	}
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("found %v shards, but has 0 nodes", len(ss.Physical))
+		return nil, fmt.Errorf("found %v shards, but has 0 nodes", ss.Physical.Len())
 	}
 
 	return nodes, nil

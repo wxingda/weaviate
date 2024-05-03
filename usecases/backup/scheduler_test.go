@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -449,15 +450,33 @@ func TestSchedulerRestoration(t *testing.T) {
 		},
 	}
 
-	shardingStateBytes1, _ := json.Marshal(&sharding.State{
-		IndexID: cls,
-		Physical: map[string]sharding.Physical{"S1": {
+	b := btree.New(1024)
+	b.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
 			Name: "S1",
-		}},
+		},
+	})
+	shardingStateBytes1, _ := json.Marshal(&sharding.State{
+		IndexID:  cls,
+		Physical: b,
+	})
+	b2 := btree.New(1024)
+	b2.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
+			Name: "S1",
+		},
+	})
+	b2.ReplaceOrInsert(sharding.PocShard{
+		Name: "S2",
+		Physical: sharding.Physical{
+			Name: "S2",
+		},
 	})
 	shardingStateBytes2, _ := json.Marshal(&sharding.State{
 		IndexID:  cls,
-		Physical: map[string]sharding.Physical{"S1": {Name: "S1"}, "S2": {Name: "S2"}},
+		Physical: b2,
 	})
 	rawClassBytes, _ := json.Marshal(&models.Class{Class: cls})
 	meta1 := backup.BackupDescriptor{

@@ -17,6 +17,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/google/btree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/weaviate/weaviate/entities/models"
@@ -39,7 +40,7 @@ func TestVersionedSchemaReaderShardReplicas(t *testing.T) {
 	assert.ErrorIs(t, err, errClassNotFound)
 
 	// shard not found
-	ss := &sharding.State{Physical: make(map[string]sharding.Physical)}
+	ss := &sharding.State{Physical: btree.New(1024)}
 
 	sc.addClass(&models.Class{Class: "C"}, ss, 1)
 
@@ -48,7 +49,7 @@ func TestVersionedSchemaReaderShardReplicas(t *testing.T) {
 
 	// two replicas found
 	nodes := []string{"A", "B"}
-	ss.Physical["S"] = sharding.Physical{BelongsToNodes: nodes}
+	ss.Physical.ReplaceOrInsert(sharding.PocShard{Name: "S", Physical: sharding.Physical{BelongsToNodes: nodes}})
 	res, err := vsc.ShardReplicas(ctx, "C", "S", 1)
 	assert.Nil(t, err)
 	assert.Equal(t, nodes, res)
@@ -92,17 +93,17 @@ func TestVersionedSchemaReaderClass(t *testing.T) {
 
 	// Add Simple class
 	cls1 := &models.Class{Class: "C"}
-	ss1 := &sharding.State{Physical: map[string]sharding.Physical{
-		"S1": {Status: "A"},
-		"S2": {Status: "A", BelongsToNodes: nodes},
-	}}
+	b := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	b.ReplaceOrInsert(sharding.PocShard{Name: "S1", Physical: sharding.Physical{Status: "A"}})
+	b.ReplaceOrInsert(sharding.PocShard{Name: "S2", Physical: sharding.Physical{Status: "A", BelongsToNodes: nodes}})
+	ss1 := &sharding.State{Physical: b}
 
 	assert.Nil(t, sc.schema.addClass(cls1, ss1, 1))
 	info, err = sc.ClassInfo(ctx, "C", 1)
 	assert.Equal(t, ClassInfo{
 		ReplicationFactor: 1,
 		ClassVersion:      1,
-		ShardVersion:      1, Exists: true, Tenants: len(ss1.Physical),
+		ShardVersion:      1, Exists: true, Tenants: ss1.Physical.Len(),
 	}, info)
 	assert.Nil(t, err)
 
@@ -127,9 +128,11 @@ func TestVersionedSchemaReaderClass(t *testing.T) {
 
 	// Add MT Class
 	cls2 := &models.Class{Class: "D", MultiTenancyConfig: &models.MultiTenancyConfig{Enabled: true}}
+	bt := btree.NewWithFreeList(1024, btree.NewFreeList(64))
+	bt.ReplaceOrInsert(sharding.PocShard{Name: "S1", Physical: sharding.Physical{Status: "A", BelongsToNodes: nodes}})
 	ss2 := &sharding.State{
 		PartitioningEnabled: true,
-		Physical:            map[string]sharding.Physical{"S1": {Status: "A", BelongsToNodes: nodes}},
+		Physical:            b,
 	}
 	sc.schema.addClass(cls2, ss2, 1)
 	cls, err = sc.ReadOnlyClass(ctx, "D", 1)
@@ -172,7 +175,7 @@ func TestSchemaReaderShardReplicas(t *testing.T) {
 	assert.ErrorIs(t, err, errClassNotFound)
 
 	// shard not found
-	ss := &sharding.State{Physical: make(map[string]sharding.Physical)}
+	ss := &sharding.State{Physical: btree.New(1024)}
 
 	sc.addClass(&models.Class{Class: "C"}, ss, 1)
 
@@ -181,7 +184,7 @@ func TestSchemaReaderShardReplicas(t *testing.T) {
 
 	// two replicas found
 	nodes := []string{"A", "B"}
-	ss.Physical["S"] = sharding.Physical{BelongsToNodes: nodes}
+	ss.Physical.ReplaceOrInsert(sharding.PocShard{Name: "S", Physical: sharding.Physical{BelongsToNodes: nodes}})
 	res, err := rsc.ShardReplicas("C", "S")
 	assert.Nil(t, err)
 	assert.Equal(t, nodes, res)
@@ -212,10 +215,30 @@ func TestSchemaReaderClass(t *testing.T) {
 
 	// Add Simple class
 	cls1 := &models.Class{Class: "C"}
-	ss1 := &sharding.State{Physical: map[string]sharding.Physical{
-		"S1": {Status: "A"},
-		"S2": {Status: "A", BelongsToNodes: nodes},
-	}}
+	bt := btree.New(1024)
+	bt.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
+			Name:   "S1",
+			Status: "A",
+		},
+	})
+	bt.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
+			Name:   "S1",
+			Status: "A",
+		},
+	})
+	bt.ReplaceOrInsert(sharding.PocShard{
+		Name: "S2",
+		Physical: sharding.Physical{
+			Name:           "S2",
+			Status:         "A",
+			BelongsToNodes: nodes,
+		},
+	})
+	ss1 := &sharding.State{Physical: bt}
 
 	sc.schema.addClass(cls1, ss1, 1)
 	assert.Equal(t, sc.ReadOnlyClass("C"), cls1)
@@ -235,10 +258,19 @@ func TestSchemaReaderClass(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Add MT Class
+	bt2 := btree.New(1024)
+	bt2.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
+			Name:           "S1",
+			Status:         "A",
+			BelongsToNodes: nodes,
+		},
+	})
 	cls2 := &models.Class{Class: "D", MultiTenancyConfig: &models.MultiTenancyConfig{Enabled: true}}
 	ss2 := &sharding.State{
 		PartitioningEnabled: true,
-		Physical:            map[string]sharding.Physical{"S1": {Status: "A", BelongsToNodes: nodes}},
+		Physical:            bt2,
 	}
 	sc.schema.addClass(cls2, ss2, 1)
 	assert.Equal(t, sc.ReadOnlyClass("D"), cls2)
@@ -259,6 +291,22 @@ func TestSchemaReaderClass(t *testing.T) {
 }
 
 func TestSchemaSnapshot(t *testing.T) {
+	bt := btree.New(1024)
+	bt.ReplaceOrInsert(sharding.PocShard{
+		Name: "S1",
+		Physical: sharding.Physical{
+			Name:   "S1",
+			Status: "A",
+		},
+	})
+	bt.ReplaceOrInsert(sharding.PocShard{
+		Name: "S2",
+		Physical: sharding.Physical{
+			Name:           "S2",
+			Status:         "A",
+			BelongsToNodes: []string{"A", "B"},
+		},
+	})
 	var (
 		node   = "N1"
 		sc     = NewSchema(node, &MockIndexer{})
@@ -266,10 +314,7 @@ func TestSchemaSnapshot(t *testing.T) {
 
 		cls = &models.Class{Class: "C"}
 		ss  = &sharding.State{
-			Physical: map[string]sharding.Physical{
-				"S1": {Status: "A"},
-				"S2": {Status: "A", BelongsToNodes: []string{"A", "B"}},
-			},
+			Physical: bt,
 		}
 	)
 	ss.SetLocalName(node)

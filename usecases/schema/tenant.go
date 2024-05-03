@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/btree"
 	"github.com/weaviate/weaviate/cluster/proto/api"
 	"github.com/weaviate/weaviate/cluster/store"
 	"github.com/weaviate/weaviate/entities/models"
@@ -198,19 +199,23 @@ func (h *Handler) getTenants(class string) ([]*models.Tenant, error) {
 
 	ts := make([]*models.Tenant, info.Tenants)
 	f := func(_ *models.Class, ss *sharding.State) error {
-		if n := len(ss.Physical); n > len(ts) {
+		if n := ss.Physical.Len(); n > len(ts) {
 			ts = make([]*models.Tenant, n)
 		} else if n < len(ts) {
 			ts = ts[:n]
 		}
 		i := 0
-		for tenant := range ss.Physical {
+		ss.Physical.Ascend(func(item btree.Item) bool {
+			pocShard := item.(sharding.PocShard)
+			tenant := pocShard.Name
+			p := pocShard.Physical
 			ts[i] = &models.Tenant{
 				Name:           tenant,
-				ActivityStatus: schema.ActivityStatus(ss.Physical[tenant].Status),
+				ActivityStatus: schema.ActivityStatus(p.Status),
 			}
 			i++
-		}
+			return true
+		})
 		return nil
 	}
 	return ts, h.metaReader.Read(class, f)
@@ -269,12 +274,13 @@ func (h *Handler) getTenantsByNames(class string, names []string) ([]*models.Ten
 	ts := make([]*models.Tenant, 0, len(names))
 	f := func(_ *models.Class, ss *sharding.State) error {
 		for _, name := range names {
-			if _, ok := ss.Physical[name]; !ok {
+			r := ss.Physical.Get(sharding.PocShard{Name: name})
+			if r == nil {
 				continue
 			}
 			ts = append(ts, &models.Tenant{
 				Name:           name,
-				ActivityStatus: schema.ActivityStatus(ss.Physical[name].Status),
+				ActivityStatus: schema.ActivityStatus(r.(sharding.PocShard).Physical.Status),
 			})
 		}
 		return nil

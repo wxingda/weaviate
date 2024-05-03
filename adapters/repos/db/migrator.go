@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/helpers"
@@ -173,13 +174,38 @@ func (m *Migrator) updateIndexTenants(ctx context.Context, idx *Index,
 func (m *Migrator) updateIndexAddTenants(ctx context.Context, idx *Index,
 	incomingClass *models.Class, incomingSS *sharding.State,
 ) error {
-	for shardName, phys := range incomingSS.Physical {
+	var err error = nil
+	incomingSS.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		shardName := pocShard.Name
+		phys := pocShard.Physical
 		// Only load the tenant if activity status == HOT
 		if schemaUC.IsLocalActiveTenant(&phys, m.db.schemaGetter.NodeName()) {
 			if _, err := idx.initLocalShard(ctx, shardName, incomingClass); err != nil {
-				return fmt.Errorf("add missing tenant shard %s during update index: %w", shardName, err)
+				err = fmt.Errorf("add missing tenant shard %s during update index: %w", shardName, err)
+				return false
 			}
 		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	incomingSS.Physical.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		shardName := pocShard.Name
+		phys := pocShard.Physical
+		// Only load the tenant if activity status == HOT
+		if schemaUC.IsLocalActiveTenant(&phys, m.db.schemaGetter.NodeName()) {
+			if _, err := idx.initLocalShard(ctx, shardName, incomingClass); err != nil {
+				err = fmt.Errorf("add missing tenant shard %s during update index: %w", shardName, err)
+				return false
+			}
+		}
+		return true
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -190,7 +216,7 @@ func (m *Migrator) updateIndexDeleteTenants(ctx context.Context,
 	var toRemove []string
 
 	idx.ForEachShard(func(name string, _ ShardLike) error {
-		if _, ok := incomingSS.Physical[name]; !ok {
+		if !incomingSS.Physical.Has(sharding.PocShard{Name: name}) {
 			toRemove = append(toRemove, name)
 		}
 		return nil

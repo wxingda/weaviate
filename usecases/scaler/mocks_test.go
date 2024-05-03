@@ -17,6 +17,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/mock"
@@ -86,9 +87,9 @@ func (f *fakeShardingState) CopyShardingState(class string) *sharding.State {
 		return nil
 	}
 	state := sharding.State{}
-	state.Physical = make(map[string]sharding.Physical)
+	state.Physical = btree.New(1024)
 	for shard, nodes := range f.M {
-		state.Physical[shard] = sharding.Physical{BelongsToNodes: nodes}
+		state.Physical.ReplaceOrInsert(sharding.PocShard{Name: shard, Physical: sharding.Physical{BelongsToNodes: nodes}})
 	}
 	state.SetLocalName(f.LocalNode)
 	return &state

@@ -44,7 +44,7 @@ func (m *metaClass) ClassInfo() (ci ClassInfo) {
 	if m.Class.ReplicationConfig != nil && m.Class.ReplicationConfig.Factor > 1 {
 		ci.ReplicationFactor = int(m.Class.ReplicationConfig.Factor)
 	}
-	ci.Tenants = len(m.Sharding.Physical)
+	ci.Tenants = m.Sharding.Physical.Len()
 	ci.ClassVersion = m.ClassVersion
 	ci.ShardVersion = m.ShardVersion
 	return ci
@@ -82,15 +82,16 @@ func (m *metaClass) CloneClass() *models.Class {
 func (m *metaClass) ShardOwner(shard string) (string, uint64, error) {
 	m.RLock()
 	defer m.RUnlock()
-	x, ok := m.Sharding.Physical[shard]
-
-	if !ok {
+	item := m.Sharding.Physical.Get(sharding.PocShard{Name: shard})
+	if item == nil {
 		return "", 0, errShardNotFound
 	}
-	if len(x.BelongsToNodes) < 1 || x.BelongsToNodes[0] == "" {
+	x := item.(sharding.PocShard)
+
+	if len(x.Physical.BelongsToNodes) < 1 || x.Physical.BelongsToNodes[0] == "" {
 		return "", 0, fmt.Errorf("owner node not found")
 	}
-	return x.BelongsToNodes[0], m.version(), nil
+	return x.Physical.BelongsToNodes[0], m.version(), nil
 }
 
 // ShardFromUUID returns shard name of the provided uuid
@@ -104,11 +105,12 @@ func (m *metaClass) ShardFromUUID(uuid []byte) (string, uint64) {
 func (m *metaClass) ShardReplicas(shard string) ([]string, uint64, error) {
 	m.RLock()
 	defer m.RUnlock()
-	x, ok := m.Sharding.Physical[shard]
-	if !ok {
+	item := m.Sharding.Physical.Get(sharding.PocShard{Name: shard})
+	if item == nil {
 		return nil, 0, errShardNotFound
 	}
-	return slices.Clone(x.BelongsToNodes), m.version(), nil
+	x := item.(sharding.PocShard)
+	return slices.Clone(x.Physical.BelongsToNodes), m.version(), nil
 }
 
 // TenantsShards returns shard name for the provided tenant and its activity status
@@ -123,8 +125,10 @@ func (m *metaClass) TenantsShards(class string, tenants ...string) (map[string]s
 
 	res := make(map[string]string, len(tenants))
 	for _, t := range tenants {
-		if physical, ok := m.Sharding.Physical[t]; ok {
-			res[t] = physical.ActivityStatus()
+		item := m.Sharding.Physical.Get(sharding.PocShard{Name: t})
+		if item != nil {
+			pocShard := item.(sharding.PocShard)
+			res[t] = pocShard.Physical.ActivityStatus()
 		}
 	}
 	return res, v
@@ -201,7 +205,8 @@ func (m *metaClass) AddTenants(nodeID string, req *command.AddTenantsRequest, re
 
 	// Iterate over requested tenants and assign them, if found, a partition
 	for i, t := range req.Tenants {
-		if _, ok := m.Sharding.Physical[t.Name]; ok {
+		item := m.Sharding.Physical.Get(sharding.PocShard{Name: t.Name})
+		if item != nil {
 			req.Tenants[i] = nil // already exists
 			continue
 		}
@@ -212,7 +217,8 @@ func (m *metaClass) AddTenants(nodeID string, req *command.AddTenantsRequest, re
 			continue
 		}
 		p := sharding.Physical{Name: t.Name, Status: t.Status, BelongsToNodes: part}
-		m.Sharding.Physical[t.Name] = p
+		// NATEE0 nate0 {nate0 [] 0  [weaviate-1] HOT}
+		m.Sharding.Physical.ReplaceOrInsert(sharding.PocShard{Name: t.Name, Physical: p})
 		// TODO-RAFT: Check here why we set =nil if it is "owned by another node"
 		if !slices.Contains(part, nodeID) {
 			req.Tenants[i] = nil // is owned by another node
@@ -241,19 +247,21 @@ func (m *metaClass) UpdateTenants(nodeID string, req *command.UpdateTenantsReque
 	missingShards := []string{}
 	ps := m.Sharding.Physical
 	for i, u := range req.Tenants {
-		p, ok := ps[u.Name]
-		if !ok {
+		item := ps.Get(sharding.PocShard{Name: u.Name})
+		if item == nil {
 			missingShards = append(missingShards, u.Name)
 			req.Tenants[i] = nil
 			continue
 		}
+		pocShard := item.(sharding.PocShard)
+		p := pocShard.Physical
 		if p.ActivityStatus() == u.Status {
 			req.Tenants[i] = nil
 			continue
 		}
 		copy := p.DeepCopy()
 		copy.Status = u.Status
-		ps[u.Name] = copy
+		ps.ReplaceOrInsert(sharding.PocShard{Name: u.Name, Physical: copy})
 		if !slices.Contains(copy.BelongsToNodes, nodeID) {
 			req.Tenants[i] = nil
 		}

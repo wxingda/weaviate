@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/google/btree"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -256,7 +257,7 @@ func TestRepositoryUpdateShards(t *testing.T) {
 	// add two shards
 	deleteClass(&schema, "C1")
 	_, ss = addClass(&schema, "C1", 0, 2, 5)
-	shards := serializeShards(ss.Physical)
+	shards := serializeShardsPoc(ss.Physical)
 	if err := repo.NewShards(ctx, "C1", shards); err != nil {
 		t.Fatalf("add new shards: %v", err)
 	}
@@ -267,14 +268,14 @@ func TestRepositoryUpdateShards(t *testing.T) {
 
 	t.Run("fails updating non existent shards", func(t *testing.T) {
 		nonExistentShards := createShards(4, 2, models.TenantActivityStatusCOLD)
-		nonExistentShardPairs := serializeShards(nonExistentShards)
+		nonExistentShardPairs := serializeShardsPoc(nonExistentShards)
 		err := repo.UpdateShards(ctx, "C1", nonExistentShardPairs)
 		require.NotNil(t, err)
 		assert.ErrorContains(t, err, "shard not found")
 	})
 
 	existentShards := createShards(3, 2, models.TenantActivityStatusCOLD)
-	existentShardPairs := serializeShards(existentShards)
+	existentShardPairs := serializeShardsPoc(existentShards)
 
 	t.Run("fails updating shards of non existent class", func(t *testing.T) {
 		err := repo.UpdateShards(ctx, "ClassNonExistent", existentShardPairs)
@@ -316,35 +317,43 @@ func createClass(name string, start, nProps, nShards int) (models.Class, shardin
 	return cls, ss
 }
 
-func createShards(start, nShards int, activityStatus string) map[string]sharding.Physical {
+func createShards(start, nShards int, activityStatus string) *btree.BTree {
 	if nShards < 1 {
 		return nil
 	}
 
-	shards := make(map[string]sharding.Physical, nShards)
+	shards := btree.New(1024)
 	for i := start; i < start+nShards; i++ {
 		name := fmt.Sprintf("shard-%d", i)
 		node := fmt.Sprintf("node-%d", i)
-		shards[name] = sharding.Physical{
-			Name:           name,
-			BelongsToNodes: []string{node},
-			Status:         activityStatus,
-		}
+		shards.ReplaceOrInsert(
+			sharding.PocShard{
+				Name: name,
+				Physical: sharding.Physical{
+					Name:           name,
+					BelongsToNodes: []string{node},
+					Status:         activityStatus,
+				}})
 	}
 	return shards
 }
 
-func replaceShards(ss *sharding.State, shards map[string]sharding.Physical) {
-	for name, shard := range shards {
-		ss.Physical[name] = shard
-	}
+func replaceShards(ss *sharding.State, shards *btree.BTree) {
+	shards.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		ss.Physical.ReplaceOrInsert(sharding.PocShard{
+			Name:     pocShard.Name,
+			Physical: pocShard.Physical,
+		})
+		return true
+	})
 }
 
 func removeShards(ss *sharding.State, shards []int) []string {
 	res := make([]string, len(shards))
 	for i, j := range shards {
 		name := fmt.Sprintf("shard-%d", j)
-		delete(ss.Physical, name)
+		ss.Physical.Delete(sharding.PocShard{Name: name})
 		res[i] = name
 	}
 	return res
@@ -393,6 +402,19 @@ func serializeShards(shards map[string]sharding.Physical) []ucs.KeyValuePair {
 		val, _ := json.Marshal(&v)
 		xs = append(xs, ucs.KeyValuePair{Key: k, Value: val})
 	}
+	return xs
+}
+
+func serializeShardsPoc(shards *btree.BTree) []ucs.KeyValuePair {
+	xs := make([]ucs.KeyValuePair, 0, shards.Len())
+	shards.Ascend(func(item btree.Item) bool {
+		pocShard := item.(sharding.PocShard)
+		k := pocShard.Name
+		v := pocShard.Physical
+		val, _ := json.Marshal(&v)
+		xs = append(xs, ucs.KeyValuePair{Key: k, Value: val})
+		return true
+	})
 	return xs
 }
 
