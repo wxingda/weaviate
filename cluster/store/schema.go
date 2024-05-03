@@ -293,16 +293,16 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 
 	// Read tenants using the meta lock guard
 	var res []*models.Tenant
-	limit := 50000
-	after := "/"
+	// limit := 50000
+	// after := "/"
 	f := func(_ *models.Class, ss *sharding.State) error {
 		if len(tenants) > 0 {
 			measurePerf(func() { res = getTenantsByNames(ss.Physical, tenants) })
 			return nil
 		}
-		// measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
+		measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
 		// measurePerf(func() { res = getAllTenants_sort(ss.Physical, limit, after) })
-		measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
+		// measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
 		return nil
 	}
 	return res, meta.RLockGuard(f)
@@ -412,8 +412,10 @@ func measurePerf(f func()) {
 	memAllocDiff := memAfter.Alloc - memBefore.Alloc
 	memTotalAllocDiff := memAfter.TotalAlloc - memBefore.TotalAlloc
 	timeDiffNano := timeAfter.UnixNano() - timeBefore.UnixNano()
-	fmt.Println("MEASUREPERF:MEMALLOC:", memAllocDiff)
-	fmt.Println("MEASUREPERF:MEMTOTALALLOC:", memTotalAllocDiff)
+	fmt.Println("MEASUREPERF:MEMALLOC:", memAfter.Alloc)
+	fmt.Println("MEASUREPERF:MEMTOTALALLOC:", memAfter.TotalAlloc)
+	fmt.Println("MEASUREPERF:MEMALLOCDIFF:", memAllocDiff)
+	fmt.Println("MEASUREPERF:MEMTOTALALLOCDIFF:", memTotalAllocDiff)
 	fmt.Println("MEASUREPERF:TIMEDIFFNS:", timeDiffNano)
 }
 
