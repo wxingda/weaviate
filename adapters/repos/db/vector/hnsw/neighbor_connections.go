@@ -98,6 +98,7 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 		if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
 			return errors.Wrap(err, "acorn heuristic")
 		}
+		// fmt.Printf("%d Neighbors after Pruning\n", results.Len())
 	} else {
 		if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
 			return errors.Wrap(err, "heuristic")

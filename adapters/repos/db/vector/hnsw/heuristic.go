@@ -178,22 +178,10 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 			if neighbor != nil {
 				for _, connectedID := range neighbor.connections[0] {
 					twoHopNeighborhood[connectedID] = true
-
-					// Add the neighbors of the neighbors to the two-hop neighborhood
-					secondNeighbor := h.nodeByID(connectedID)
-					if secondNeighbor != nil {
-						for _, secondConnectedID := range secondNeighbor.connections[0] {
-							twoHopNeighborhood[secondConnectedID] = true
-						}
-					}
 				}
 			} else {
 				log.Printf("Node %d: Neighbor not found for ID: %d", node.id, curr.ID)
 			}
-		}
-
-		if len(twoHopNeighborhood)+len(returnList) >= max*h.acornGamma {
-			break
 		}
 	}
 

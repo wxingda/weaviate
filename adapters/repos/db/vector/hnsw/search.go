@@ -1112,7 +1112,7 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 	}
 	connectionsReusable := make([]uint64, h.maximumConnectionsLayerZero*h.acornGamma) // could be this
 
-	for candidates.Len() > 0 || results.Len() < ef {
+	for candidates.Len() > 0 {
 		var dist float32
 		candidate := candidates.Pop()
 		dist = candidate.Dist
@@ -1146,13 +1146,13 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 				} else {
 					neighborNode := h.nodes[neighborID]
 					if neighborNode != nil {
-						neighborNode.Lock()
+						//neighborNode.RLock()
 						for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
 							if allowList.Contains(neighborOfNeighborID) {
 								neighbors = append(neighbors, neighborOfNeighborID)
 							}
 						}
-						neighborNode.Unlock()
+						//neighborNode.RUnlock()
 					}
 				}
 			}
