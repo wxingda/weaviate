@@ -13,7 +13,6 @@ package hnsw
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -96,15 +95,14 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	max := n.maximumConnections(level)
 
 	// ACORN seems to not prune on layers > 0 at all, that does not work in this implementation.
-	if n.graph.acorn && level == 0 {
-		max *= n.graph.acornGamma
-		if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
-			return errors.Wrap(err, "acorn heuristic")
+	if n.graph.acorn {
+		if level == 0 {
+			max *= n.graph.acornGamma
+			if err := n.graph.ACORNprune(n.node, results, max, n.denyList); err != nil {
+				return errors.Wrap(err, "acorn heuristic")
+			}
 		}
-		if results.Len() < n.graph.acornMBeta {
-			fmt.Print("HERE FOUND ONE!!")
-		}
-		//fmt.Printf("Node id %d has %d Neighbors after Pruning\n", n.node.id, results.Len())
+		// No pruning at higher levels
 	} else {
 		if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
 			return errors.Wrap(err, "heuristic")
@@ -123,11 +121,10 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 		neighbors = append(neighbors, id)
 	}
 
-	n.graph.pools.pqResults.Put(results)
+	n.graph.pools.pqResults.Put(results) // Put this back so the next thread can use it, brilliant
 
 	// set all outgoing in one go
 	n.node.setConnectionsAtLevel(level, neighbors)
-
 	n.graph.commitLog.ReplaceLinksAtLevel(n.node.id, level, neighbors)
 
 	for _, neighborID := range neighbors {
@@ -206,9 +203,17 @@ func (n *neighborFinderConnector) connectNeighborAtLevel(neighborID uint64,
 			candidates.Insert(existingConnection, dist)
 		}
 
-		err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList)
-		if err != nil {
-			return errors.Wrap(err, "connect neighbors")
+		// Replace backward pruning with ACORNprune
+		if n.graph.acorn {
+			err = n.graph.ACORNprune(n.graph.nodes[neighborID], candidates, maximumConnections*n.graph.acornGamma, nil)
+			if err != nil {
+				return errors.Wrap(err, "connect neighbors")
+			}
+		} else {
+			err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList)
+			if err != nil {
+				return errors.Wrap(err, "connect neighbors")
+			}
 		}
 
 		neighbor.resetConnectionsAtLevelNoLock(level)

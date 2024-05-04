@@ -182,9 +182,9 @@ func TestFilteredRecall(t *testing.T) {
 				defer wg.Done()
 				for i, vec := range myJobs {
 					originalIndex := (i * workerCount) + workerID
-					fmt.Println(originalIndex)
 					nodeId := uint64(originalIndex)
 					err := vectorIndex.Add(nodeId, vec.Vector)
+					fmt.Println(originalIndex)
 					require.Nil(t, err)
 					/* INSERT INTO FILTER TO ID MAPPING */
 					mutex.Lock()

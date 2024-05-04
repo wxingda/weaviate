@@ -1148,24 +1148,13 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 					if neighborNode != nil {
 						//neighborNode.RLock()
 						// Workaround, the first ~150 (multi-threading) nodes cannot have >MBeta neighbors
-						fmt.Printf("At neighborID: %d \n", neighborID)
-						fmt.Printf("NeighborID: %d has %d connections", neighborID, len(h.nodes[neighborID].connections[level]))
-						if neighborID > 200 {
-							for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level][h.acornMBeta:] {
-								if allowList.Contains(neighborOfNeighborID) {
-									neighbors = append(neighbors, neighborOfNeighborID)
-								}
-							}
-						} else {
-							// just check all neighbors
-							for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
-								if allowList.Contains(neighborOfNeighborID) {
-									neighbors = append(neighbors, neighborOfNeighborID)
-								}
+						for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
+							if allowList.Contains(neighborOfNeighborID) {
+								neighbors = append(neighbors, neighborOfNeighborID)
 							}
 						}
-						//neighborNode.RUnlock()
 					}
+					//neighborNode.RUnlock()
 				}
 			}
 		} else {

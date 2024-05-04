@@ -72,7 +72,6 @@ func (v *vertex) setConnectionsAtLevel(level int, connections []uint64) {
 		v.connections[level] = connections
 		return
 	}
-
 	v.connections[level] = v.connections[level][:newLen]
 	copy(v.connections[level], connections)
 }
