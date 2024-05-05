@@ -303,7 +303,8 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 		}
 		// measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
 		// measurePerf(func() { res = getAllTenants_sort(ss.Physical, limit, after) })
-		measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
+		// measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
+		measurePerf(func() { res = getAllTenants_pq(ss.Physical, limit, after) })
 		return nil
 	}
 	return res, meta.RLockGuard(f)
@@ -398,6 +399,135 @@ func getTenantsByNames(shards map[string]sharding.Physical, tenants []string) []
 		if status, ok := shards[tenant]; ok {
 			res = append(res, makeTenant(tenant, entSchema.ActivityStatus(status.Status)))
 		}
+	}
+	return res
+}
+
+// TODO copeid from vector dist queue file
+type StringPriorityQueue struct {
+	items []string
+	less  func(items []string, i, j int) bool
+}
+
+// NewMin constructs a priority queue with smaller TODO
+func NewMinStringPriorityQueue(capacity int) *StringPriorityQueue {
+	return &StringPriorityQueue{
+		items: make([]string, 0, capacity),
+		less: func(items []string, i, j int) bool {
+			return items[i] < items[j]
+		},
+	}
+}
+
+// Pop removes the next item in the queue and returns it
+func (q *StringPriorityQueue) Pop() string {
+	out := q.items[0]
+	q.items[0] = q.items[len(q.items)-1]
+	q.items = q.items[:len(q.items)-1]
+	q.heapify(0)
+	return out
+}
+
+// Top peeks at the next item in the queue
+func (q *StringPriorityQueue) Top() string {
+	return q.items[0]
+}
+
+// Len returns the length of the queue
+func (q *StringPriorityQueue) Len() int {
+	return len(q.items)
+}
+
+// Cap returns the remaining capacity of the queue
+func (q *StringPriorityQueue) Cap() int {
+	return cap(q.items)
+}
+
+// Reset clears all items from the queue
+func (q *StringPriorityQueue) Reset() {
+	q.items = q.items[:0]
+}
+
+// ResetCap drops existing queue items, and allocates a new queue with the given capacity
+func (q *StringPriorityQueue) ResetCap(capacity int) {
+	q.items = make([]string, 0, capacity)
+}
+
+// Insert creates a valueless item and adds it to the queue
+func (q *StringPriorityQueue) Insert(item string) int {
+	return q.insert(item)
+}
+
+// InsertWithValue creates an item with a T type value and adds it to the queue
+func (q *StringPriorityQueue) InsertWithValue(item string) int {
+	return q.insert(item)
+}
+
+func (q *StringPriorityQueue) insert(item string) int {
+	q.items = append(q.items, item)
+	i := len(q.items) - 1
+	for i != 0 && q.less(q.items, i, q.parent(i)) {
+		q.swap(i, q.parent(i))
+		i = q.parent(i)
+	}
+	return i
+}
+
+func (q *StringPriorityQueue) left(i int) int {
+	return 2*i + 1
+}
+
+func (q *StringPriorityQueue) right(i int) int {
+	return 2*i + 2
+}
+
+func (q *StringPriorityQueue) parent(i int) int {
+	return (i - 1) / 2
+}
+
+func (q *StringPriorityQueue) swap(i, j int) {
+	q.items[i], q.items[j] = q.items[j], q.items[i]
+}
+
+func (q *StringPriorityQueue) heapify(i int) {
+	left := q.left(i)
+	right := q.right(i)
+	smallest := i
+	if left < len(q.items) && q.less(q.items, left, i) {
+		smallest = left
+	}
+
+	if right < len(q.items) && q.less(q.items, right, smallest) {
+		smallest = right
+	}
+
+	if smallest != i {
+		q.swap(i, smallest)
+		q.heapify(smallest)
+	}
+}
+
+func getAllTenants_pq(shards map[string]sharding.Physical, limit int, after string) []*models.Tenant {
+	pq := NewMinStringPriorityQueue(limit)
+	for tenant := range shards {
+		// ignore all tenants which come before the "after" arg
+		if tenant <= after {
+			continue
+		}
+		// go through the rest of the tenants storing only the ones we're going to return
+		pq.Insert(tenant)
+		if pq.Len() > limit {
+			pq.Pop()
+		}
+	}
+	res := make([]*models.Tenant, pq.Len())
+	resIndex := 0
+	// TODO only one of these checks?
+	for pq.Len() > 0 && resIndex < len(res) {
+		// this is a min heap, so popping gives tenants in sorted order
+		tenant := pq.Pop()
+		res[resIndex] = makeTenant(tenant, entSchema.ActivityStatus(shards[tenant].Status))
+		resIndex++
 	}
 	return res
 }
