@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	command "github.com/weaviate/weaviate/cluster/proto/api"
 	"github.com/weaviate/weaviate/entities/models"
 	entSchema "github.com/weaviate/weaviate/entities/schema"
@@ -293,16 +294,16 @@ func (s *schema) getTenants(class string, tenants []string) ([]*models.Tenant, e
 
 	// Read tenants using the meta lock guard
 	var res []*models.Tenant
-	// limit := 50000
-	// after := "/"
+	limit := 1000
+	after := uuid.New().String()
 	f := func(_ *models.Class, ss *sharding.State) error {
 		if len(tenants) > 0 {
 			measurePerf(func() { res = getTenantsByNames(ss.Physical, tenants) })
 			return nil
 		}
-		measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
+		// measurePerf(func() { res = getAllTenants_v0(ss.Physical) })
 		// measurePerf(func() { res = getAllTenants_sort(ss.Physical, limit, after) })
-		// measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
+		measurePerf(func() { res = getAllTenants_heap(ss.Physical, limit, after) })
 		return nil
 	}
 	return res, meta.RLockGuard(f)
