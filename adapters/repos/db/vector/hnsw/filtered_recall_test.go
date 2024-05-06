@@ -141,14 +141,14 @@ func TestFilteredRecall(t *testing.T) {
 		efConstruction := 256
 		ef := 256
 		maxNeighbors := 64
-		acornGamma := 100 // recommend to set as 1 / selectivity, so:
+		acornGamma := 10 // recommend to set as 1 / selectivity, so:
 		/*
 			1% = 1 / 0.01 = 100
 			5% = 1 / 0.05 = 20
 			10% = 1 / 0.1 = 10
 			20% = 1 / 0.2 = 5
 		*/
-		acornMBeta := 128 // setting MBeta too low results in fewer distance based neighbors
+		acornMBeta := 256 // setting MBeta too low results in fewer distance based neighbors
 		index, err := New(Config{
 			RootPath:              "doesnt-matter-as-commitlogger-is-mocked-out",
 			ID:                    "recallbenchmark",
