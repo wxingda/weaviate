@@ -1135,8 +1135,9 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 			continue
 		}
 
+		// This is maybe not the most elegant way of doing it -- we could alternately do this in the `for _, neighborID := range connectionsReusable` below ?
 		neighbors := make([]uint64, 0, len(candidateNode.connections[level]))
-		compressionHeuristic := true
+		compressionHeuristic := false
 		if compressionHeuristic {
 			for i, neighborID := range candidateNode.connections[level] {
 				if i < h.acornMBeta {
@@ -1164,7 +1165,7 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 				}
 			}
 		}
-		neighbors = neighbors[:min(len(neighbors), len(connectionsReusable))]
+		neighbors = neighbors[:min(len(neighbors), h.maximumConnections)]
 		connectionsReusable = connectionsReusable[:len(neighbors)]
 
 		copy(connectionsReusable, neighbors)

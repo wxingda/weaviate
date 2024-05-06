@@ -186,6 +186,7 @@ func (n *neighborFinderConnector) connectNeighborAtLevel(neighborID uint64,
 			return nil
 		}
 
+		// I think we want a Min Queue for ACORNpruning, but let's save that for now.
 		candidates := priorityqueue.NewMax[any](len(currentConnections) + 1)
 		candidates.Insert(n.node.id, dist)
 
@@ -205,10 +206,13 @@ func (n *neighborFinderConnector) connectNeighborAtLevel(neighborID uint64,
 
 		// Replace backward pruning with ACORNprune
 		if n.graph.acorn {
-			err = n.graph.ACORNprune(n.graph.nodes[neighborID], candidates, maximumConnections*n.graph.acornGamma, nil)
-			if err != nil {
-				return errors.Wrap(err, "connect neighbors")
+			if level == 0 {
+				err = n.graph.ACORNprune(n.graph.nodes[neighborID], candidates, maximumConnections*n.graph.acornGamma, nil)
+				if err != nil {
+					return errors.Wrap(err, "connect neighbors")
+				}
 			}
+			// no pruning at higher levels in ACORN
 		} else {
 			err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList)
 			if err != nil {
