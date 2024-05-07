@@ -179,8 +179,7 @@ func (h *hnsw) ACORNprune(node *vertex, input *priorityqueue.Queue[any], max int
 				log.Printf("Node %d: Neighbor not found for ID: %d", node.id, curr.ID)
 			}
 		}
-		// removing this really slows down queries and TTI, but yes taking this out fixes recall
-		if len(twoHopNeighborhood)+len(returnList) > h.maximumConnections*h.acornGamma {
+		if (len(twoHopNeighborhood) + len(returnList)) > h.maximumConnections*h.acornGamma {
 			break
 		}
 	}
