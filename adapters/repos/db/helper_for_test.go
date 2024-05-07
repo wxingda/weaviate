@@ -26,8 +26,10 @@ import (
 	"github.com/weaviate/weaviate/adapters/repos/db/indexcheckpoint"
 	"github.com/weaviate/weaviate/adapters/repos/db/inverted"
 	"github.com/weaviate/weaviate/adapters/repos/db/inverted/stopwords"
+	"github.com/weaviate/weaviate/entities/locks"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
+	schemaConfig "github.com/weaviate/weaviate/entities/schema/config"
 	"github.com/weaviate/weaviate/entities/storobj"
 	enthnsw "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
 	"github.com/weaviate/weaviate/usecases/memwatch"
@@ -214,7 +216,7 @@ func testShard(t *testing.T, ctx context.Context, className string, indexOpts ..
 }
 
 func testShardWithSettings(t *testing.T, ctx context.Context, class *models.Class,
-	vic schema.VectorIndexConfig, withStopwords, withCheckpoints bool, indexOpts ...func(*Index),
+	vic schemaConfig.VectorIndexConfig, withStopwords, withCheckpoints bool, indexOpts ...func(*Index),
 ) (ShardLike, *Index) {
 	tmpDir := t.TempDir()
 	logger, _ := test.NewNullLogger()
@@ -265,6 +267,8 @@ func testShardWithSettings(t *testing.T, ctx context.Context, class *models.Clas
 		stopwords:             sd,
 		indexCheckpoints:      checkpts,
 		allocChecker:          memwatch.NewDummyMonitor(),
+		shardCreateLocks:      locks.NewNamedLocks(),
+		shardInUseLocks:       locks.NewNamedRWLocks(),
 	}
 	idx.closingCtx, idx.closingCancel = context.WithCancel(context.Background())
 	idx.initCycleCallbacksNoop()
@@ -273,11 +277,10 @@ func testShardWithSettings(t *testing.T, ctx context.Context, class *models.Clas
 	}
 
 	shardName := shardState.AllPhysicalShards()[0]
-	shard, err := idx.initShard(ctx, shardName, class, nil)
+	err = idx.initAndStoreShard(ctx, shardName, class, nil)
 	require.NoError(t, err)
 
-	idx.shards.Store(shardName, shard)
-	return shard, idx
+	return idx.shards.Load(shardName), idx
 }
 
 func testObject(className string) *storobj.Object {

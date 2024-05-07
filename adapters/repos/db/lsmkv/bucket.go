@@ -35,6 +35,13 @@ import (
 
 const FlushAfterDirtyDefault = 60 * time.Second
 
+type BucketCreator interface {
+	NewBucket(ctx context.Context, dir, rootDir string, logger logrus.FieldLogger,
+		metrics *Metrics, compactionCallbacks, flushCallbacks cyclemanager.CycleCallbackGroup,
+		opts ...BucketOption,
+	) (*Bucket, error)
+}
+
 type Bucket struct {
 	dir      string
 	rootDir  string
@@ -113,13 +120,15 @@ type Bucket struct {
 	allocChecker memwatch.AllocChecker
 }
 
+func NewBucketCreator() *Bucket { return &Bucket{} }
+
 // NewBucket initializes a new bucket. It either loads the state from disk if
 // it exists, or initializes new state.
 //
 // You do not need to ever call NewBucket() yourself, if you are using a
 // [Store]. In this case the [Store] can manage buckets for you, using methods
 // such as CreateOrLoadBucket().
-func NewBucket(ctx context.Context, dir, rootDir string, logger logrus.FieldLogger,
+func (*Bucket) NewBucket(ctx context.Context, dir, rootDir string, logger logrus.FieldLogger,
 	metrics *Metrics, compactionCallbacks, flushCallbacks cyclemanager.CycleCallbackGroup,
 	opts ...BucketOption,
 ) (*Bucket, error) {
