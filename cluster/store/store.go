@@ -444,7 +444,7 @@ func (st *Store) WaitToRestoreDB(ctx context.Context, period time.Duration, clos
 
 // WaitForAppliedIndex waits until the update with the given version is propagated to this follower node
 func (st *Store) WaitForAppliedIndex(ctx context.Context, period time.Duration, version uint64) error {
-	if idx := st.lastAppliedIndex.Load(); idx >= version {
+	if idx := st.raft.LastIndex(); idx >= version {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, st.consistencyWaitTimeout)
@@ -457,7 +457,7 @@ func (st *Store) WaitForAppliedIndex(ctx context.Context, period time.Duration, 
 		case <-ctx.Done():
 			return fmt.Errorf("%w: version got=%d  want=%d", ErrDeadlineExceeded, idx, version)
 		case <-ticker.C:
-			if idx = st.lastAppliedIndex.Load(); idx >= version {
+			if idx = st.raft.LastIndex(); idx >= version {
 				return nil
 			} else {
 				st.log.WithFields(logrus.Fields{
