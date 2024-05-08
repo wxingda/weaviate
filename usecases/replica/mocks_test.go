@@ -82,16 +82,16 @@ func (f *fakeClient) MergeObject(ctx context.Context, host, index, shard, reques
 }
 
 func (f *fakeClient) PutObjects(ctx context.Context, host, index, shard, requestID string,
-	objs []*storobj.Object,
+	objs []*storobj.Object, schemaVersion uint64,
 ) (SimpleResponse, error) {
-	args := f.Called(ctx, host, index, shard, requestID, objs)
+	args := f.Called(ctx, host, index, shard, requestID, objs, schemaVersion)
 	return args.Get(0).(SimpleResponse), args.Error(1)
 }
 
 func (f *fakeClient) DeleteObjects(ctx context.Context, host, index, shard, requestID string,
-	uuids []strfmt.UUID, dryRun bool,
+	uuids []strfmt.UUID, dryRun bool, schemaVersion uint64,
 ) (SimpleResponse, error) {
-	args := f.Called(ctx, host, index, shard, requestID, uuids, dryRun)
+	args := f.Called(ctx, host, index, shard, requestID, uuids, dryRun, schemaVersion)
 	return args.Get(0).(SimpleResponse), args.Error(1)
 }
 

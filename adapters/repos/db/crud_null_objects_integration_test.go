@@ -17,19 +17,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/weaviate/weaviate/entities/dto"
-	"github.com/weaviate/weaviate/entities/filters"
-	enthnsw "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
-
 	"github.com/go-openapi/strfmt"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus/hooks/test"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/weaviate/weaviate/entities/additional"
+	"github.com/weaviate/weaviate/entities/dto"
+	"github.com/weaviate/weaviate/entities/filters"
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
+	enthnsw "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
+	"github.com/weaviate/weaviate/usecases/memwatch"
 	"github.com/weaviate/weaviate/usecases/objects"
 )
 
@@ -124,7 +123,7 @@ func TestNullArrayClass(t *testing.T) {
 				batch := make([]objects.BatchObject, 2)
 				batch[0] = objects.BatchObject{Object: arrayObjNil, UUID: arrayObjNil.ID}
 				batch[1] = objects.BatchObject{Object: arrayObjEmpty, UUID: arrayObjEmpty.ID}
-				_, err := repo.BatchPutObjects(context.Background(), batch, nil)
+				_, err := repo.BatchPutObjects(context.Background(), batch, nil, 0)
 				assert.Nil(t, err)
 			}
 
@@ -154,7 +153,7 @@ func createRepo(t *testing.T) (*Migrator, *DB, *fakeSchemaGetter) {
 		RootPath:                  dirName,
 		QueryMaximumResults:       10,
 		MaxImportGoroutinesFactor: 1,
-	}, &fakeRemoteClient{}, &fakeNodeResolver{}, &fakeRemoteNodeClient{}, &fakeReplicationClient{}, nil)
+	}, &fakeRemoteClient{}, &fakeNodeResolver{}, &fakeRemoteNodeClient{}, &fakeReplicationClient{}, nil, memwatch.NewDummyMonitor())
 	require.Nil(t, err)
 	repo.SetSchemaGetter(schemaGetter)
 	require.Nil(t, repo.WaitForStartup(testCtx()))

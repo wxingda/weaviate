@@ -24,7 +24,8 @@ import (
 
 const (
 	// RequestKey is used to marshalling request IDs
-	RequestKey = "request_id"
+	RequestKey       = "request_id"
+	SchemaVersionKey = "schema_version"
 )
 
 // Client is used to read and write objects on replicas
@@ -170,11 +171,11 @@ type wClient interface {
 	DeleteObject(ctx context.Context, host, index, shard, requestID string,
 		id strfmt.UUID) (SimpleResponse, error)
 	PutObjects(ctx context.Context, host, index, shard, requestID string,
-		objs []*storobj.Object) (SimpleResponse, error)
+		objs []*storobj.Object, schemaVersion uint64) (SimpleResponse, error)
 	MergeObject(ctx context.Context, host, index, shard, requestID string,
 		mergeDoc *objects.MergeDocument) (SimpleResponse, error)
 	DeleteObjects(ctx context.Context, host, index, shard, requestID string,
-		uuids []strfmt.UUID, dryRun bool) (SimpleResponse, error)
+		uuids []strfmt.UUID, dryRun bool, schemaVersion uint64) (SimpleResponse, error)
 	AddReferences(ctx context.Context, host, index, shard, requestID string,
 		refs []objects.BatchReference) (SimpleResponse, error)
 	Commit(ctx context.Context, host, index, shard, requestID string, resp interface{}) error

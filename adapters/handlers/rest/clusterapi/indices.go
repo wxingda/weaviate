@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
+	"github.com/weaviate/weaviate/adapters/repos/db"
 	"github.com/weaviate/weaviate/entities/additional"
 	"github.com/weaviate/weaviate/entities/aggregation"
 	"github.com/weaviate/weaviate/entities/filters"
@@ -34,15 +35,14 @@ import (
 )
 
 type indices struct {
-	shards                 shards
-	db                     db
-	auth                   auth
-	regexpObjects          *regexp.Regexp
-	regexpObjectsOverwrite *regexp.Regexp
-	regexObjectsDigest     *regexp.Regexp
-	regexpObjectsSearch    *regexp.Regexp
-	regexpObjectsFind      *regexp.Regexp
-
+	shards                    shards
+	db                        *db.DB
+	auth                      auth
+	regexpObjects             *regexp.Regexp
+	regexpObjectsOverwrite    *regexp.Regexp
+	regexObjectsDigest        *regexp.Regexp
+	regexpObjectsSearch       *regexp.Regexp
+	regexpObjectsFind         *regexp.Regexp
 	regexpObjectsAggregations *regexp.Regexp
 	regexpObject              *regexp.Regexp
 	regexpReferences          *regexp.Regexp
@@ -90,7 +90,7 @@ type shards interface {
 	PutObject(ctx context.Context, indexName, shardName string,
 		obj *storobj.Object) error
 	BatchPutObjects(ctx context.Context, indexName, shardName string,
-		objs []*storobj.Object) []error
+		objs []*storobj.Object, schemaVersion uint64) []error
 	BatchAddReferences(ctx context.Context, indexName, shardName string,
 		refs objects.BatchReferences) []error
 	GetObject(ctx context.Context, indexName, shardName string,
@@ -115,7 +115,7 @@ type shards interface {
 	FindUUIDs(ctx context.Context, indexName, shardName string,
 		filters *filters.LocalFilter) ([]strfmt.UUID, error)
 	DeleteObjectBatch(ctx context.Context, indexName, shardName string,
-		uuids []strfmt.UUID, dryRun bool) objects.BatchSimpleObjects
+		uuids []strfmt.UUID, dryRun bool, schemaVersion uint64) objects.BatchSimpleObjects
 	GetShardQueueSize(ctx context.Context, indexName, shardName string) (int64, error)
 	GetShardStatus(ctx context.Context, indexName, shardName string) (string, error)
 	UpdateShardStatus(ctx context.Context, indexName, shardName,
@@ -134,11 +134,7 @@ type shards interface {
 	ReInitShard(ctx context.Context, indexName, shardName string) error
 }
 
-type db interface {
-	StartupComplete() bool
-}
-
-func NewIndices(shards shards, db db, auth auth) *indices {
+func NewIndices(shards shards, db *db.DB, auth auth) *indices {
 	return &indices{
 		regexpObjects:          regexp.MustCompile(urlPatternObjects),
 		regexpObjectsOverwrite: regexp.MustCompile(urlPatternObjectsOverwrite),
@@ -348,7 +344,7 @@ func (i *indices) postObjectSingle(w http.ResponseWriter, r *http.Request,
 }
 
 func (i *indices) postObjectBatch(w http.ResponseWriter, r *http.Request,
-	index, shard string,
+	class, shard string,
 ) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -362,7 +358,19 @@ func (i *indices) postObjectBatch(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	errs := i.shards.BatchPutObjects(r.Context(), index, shard, objs)
+	index := i.db.GetIndexForIncoming(entschema.ClassName(class))
+	if index == nil {
+		http.Error(w, "index not found", http.StatusInternalServerError)
+		return
+	}
+
+	schemaVersion := extractSchemaVersionFromUrlQuery(r.URL.Query())
+
+	errs := index.IncomingBatchPutObjects(r.Context(), shard, objs, schemaVersion)
+	if len(errs) > 0 && errors.Is(errs[0], db.ErrShardNotFound) {
+		http.Error(w, errs[0].Error(), http.StatusInternalServerError)
+		return
+	}
 	errsJSON, err := IndicesPayloads.ErrorList.Marshal(errs)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -896,7 +904,9 @@ func (i *indices) deleteObjects() http.Handler {
 			return
 		}
 
-		results := i.shards.DeleteObjectBatch(r.Context(), index, shard, uuids, dryRun)
+		schemaVersion := extractSchemaVersionFromUrlQuery(r.URL.Query())
+
+		results := i.shards.DeleteObjectBatch(r.Context(), index, shard, uuids, dryRun, schemaVersion)
 
 		resBytes, err := IndicesPayloads.BatchDeleteResults.Marshal(results)
 		if err != nil {

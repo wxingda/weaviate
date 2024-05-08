@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/pkg/errors"
@@ -31,6 +32,7 @@ import (
 	"github.com/weaviate/weaviate/entities/searchparams"
 	"github.com/weaviate/weaviate/entities/storobj"
 	"github.com/weaviate/weaviate/usecases/objects"
+	"github.com/weaviate/weaviate/usecases/replica"
 	"github.com/weaviate/weaviate/usecases/scaler"
 )
 
@@ -45,38 +47,26 @@ func NewRemoteIndex(httpClient *http.Client) *RemoteIndex {
 	}}
 }
 
-func (c *RemoteIndex) PutObject(ctx context.Context, hostName, indexName,
-	shardName string, obj *storobj.Object,
+func (c *RemoteIndex) PutObject(ctx context.Context, host, index,
+	shard string, obj *storobj.Object,
 ) error {
-	path := fmt.Sprintf("/indices/%s/shards/%s/objects", indexName, shardName)
+	path := fmt.Sprintf("/indices/%s/shards/%s/objects", index, shard)
 	method := http.MethodPost
-	url := url.URL{Scheme: "http", Host: hostName, Path: path}
+	url := url.URL{Scheme: "http", Host: host, Path: path}
 
-	marshalled, err := clusterapi.IndicesPayloads.SingleObject.Marshal(obj)
+	body, err := clusterapi.IndicesPayloads.SingleObject.Marshal(obj)
 	if err != nil {
-		return errors.Wrap(err, "marshal payload")
+		return fmt.Errorf("encode request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url.String(),
-		bytes.NewReader(marshalled))
+	req, err := http.NewRequestWithContext(ctx, method, url.String(), nil)
 	if err != nil {
-		return errors.Wrap(err, "open http request")
+		return fmt.Errorf("create http request: %w", err)
 	}
 
 	clusterapi.IndicesPayloads.SingleObject.SetContentTypeHeaderReq(req)
-	res, err := c.client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "send http request")
-	}
-
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(res.Body)
-		return errors.Errorf("unexpected status code %d (%s)", res.StatusCode,
-			body)
-	}
-
-	return nil
+	_, err = c.do(c.timeoutUnit*30, req, body, nil, successCode)
+	return err
 }
 
 func duplicateErr(in error, count int) []error {
@@ -87,50 +77,39 @@ func duplicateErr(in error, count int) []error {
 	return out
 }
 
-func (c *RemoteIndex) BatchPutObjects(ctx context.Context, hostName, indexName,
-	shardName string, objs []*storobj.Object, _ *additional.ReplicationProperties,
+func (c *RemoteIndex) BatchPutObjects(ctx context.Context, host, index,
+	shard string, objs []*storobj.Object, _ *additional.ReplicationProperties, schemaVersion uint64,
 ) []error {
-	path := fmt.Sprintf("/indices/%s/shards/%s/objects", indexName, shardName)
-	method := http.MethodPost
-	url := url.URL{Scheme: "http", Host: hostName, Path: path}
-
-	marshalled, err := clusterapi.IndicesPayloads.ObjectList.Marshal(objs)
-	if err != nil {
-		return duplicateErr(errors.Wrap(err, "marshal payload"), len(objs))
+	value := []string{strconv.FormatUint(schemaVersion, 10)}
+	url := url.URL{
+		Scheme:   "http",
+		Host:     host,
+		Path:     fmt.Sprintf("/indices/%s/shards/%s/objects", index, shard),
+		RawQuery: url.Values{replica.SchemaVersionKey: value}.Encode(),
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url.String(),
-		bytes.NewReader(marshalled))
+	body, err := clusterapi.IndicesPayloads.ObjectList.Marshal(objs)
 	if err != nil {
-		return duplicateErr(errors.Wrap(err, "open http request"), len(objs))
+		return duplicateErr(fmt.Errorf("encode request: %w", err), len(objs))
 	}
 
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url.String(), nil)
+	if err != nil {
+		return duplicateErr(fmt.Errorf("create http request: %w", err), len(objs))
+	}
 	clusterapi.IndicesPayloads.ObjectList.SetContentTypeHeaderReq(req)
 
-	res, err := c.client.Do(req)
-	if err != nil {
-		return duplicateErr(errors.Wrap(err, "send http request"), len(objs))
+	var resp []error
+	decode := func(data []byte) error {
+		resp = clusterapi.IndicesPayloads.ErrorList.Unmarshal(data)
+		return nil
 	}
 
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		return duplicateErr(errors.Errorf("unexpected status code %d (%s)",
-			res.StatusCode, body), len(objs))
+	if err = c.doWithCustomMarshaller(c.timeoutUnit*30, req, body, decode, successCode); err != nil {
+		return duplicateErr(err, len(objs))
 	}
 
-	if ct, ok := clusterapi.IndicesPayloads.ErrorList.
-		CheckContentTypeHeader(res); !ok {
-		return duplicateErr(errors.Errorf("unexpected content type: %s",
-			ct), len(objs))
-	}
-
-	resBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return duplicateErr(errors.Wrap(err, "ready body"), len(objs))
-	}
-
-	return clusterapi.IndicesPayloads.ErrorList.Unmarshal(resBytes)
+	return resp
 }
 
 func (c *RemoteIndex) BatchAddReferences(ctx context.Context, hostName, indexName,
@@ -248,37 +227,20 @@ func (c *RemoteIndex) GetObject(ctx context.Context, hostName, indexName,
 func (c *RemoteIndex) Exists(ctx context.Context, hostName, indexName,
 	shardName string, id strfmt.UUID,
 ) (bool, error) {
-	path := fmt.Sprintf("/indices/%s/shards/%s/objects/%s", indexName, shardName, id)
-	method := http.MethodGet
-	url := url.URL{Scheme: "http", Host: hostName, Path: path}
-	q := url.Query()
-	q.Set("check_exists", "true")
-	url.RawQuery = q.Encode()
+	rURL := url.URL{
+		Scheme:   "http",
+		Host:     hostName,
+		Path:     fmt.Sprintf("/indices/%s/shards/%s/objects/%s", indexName, shardName, id),
+		RawQuery: url.Values{"check_exists": []string{"true"}}.Encode(),
+	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rURL.String(), nil)
 	if err != nil {
-		return false, errors.Wrap(err, "open http request")
+		return false, fmt.Errorf("create http request: %w", err)
 	}
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return false, errors.Wrap(err, "send http request")
-	}
-
-	defer res.Body.Close()
-	if res.StatusCode == http.StatusNotFound {
-		// this is a legitimate case - the requested ID doesn't exist, don't try
-		// to unmarshal anything
-		return false, nil
-	}
-
-	if res.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(res.Body)
-		return false, errors.Errorf("unexpected status code %d (%s)", res.StatusCode,
-			body)
-	}
-
-	return true, nil
+	ok := func(code int) bool { return code == http.StatusNotFound || code == http.StatusNoContent }
+	code, err := c.do(c.timeoutUnit*20, req, nil, nil, ok)
+	return code != http.StatusNotFound, err
 }
 
 func (c *RemoteIndex) DeleteObject(ctx context.Context, hostName, indexName,
@@ -437,7 +399,7 @@ func (c *RemoteIndex) SearchShard(ctx context.Context, host, index, shard string
 
 	// send request
 	resp := &searchShardResp{}
-	err = c.doWithCustomMarshaller(c.timeoutUnit*20, req, body, resp.decode)
+	err = c.doWithCustomMarshaller(c.timeoutUnit*20, req, body, resp.decode, successCode)
 	return resp.Objects, resp.Distributions, err
 }
 
@@ -482,7 +444,7 @@ func (c *RemoteIndex) Aggregate(ctx context.Context, hostName, index,
 
 	// send request
 	resp := &aggregateResp{}
-	err = c.doWithCustomMarshaller(c.timeoutUnit*20, req, body, resp.decode)
+	err = c.doWithCustomMarshaller(c.timeoutUnit*20, req, body, resp.decode, successCode)
 	return resp.Result, err
 }
 
@@ -535,11 +497,17 @@ func (c *RemoteIndex) FindUUIDs(ctx context.Context, hostName, indexName,
 }
 
 func (c *RemoteIndex) DeleteObjectBatch(ctx context.Context, hostName, indexName, shardName string,
-	uuids []strfmt.UUID, dryRun bool,
+	uuids []strfmt.UUID, dryRun bool, schemaVersion uint64,
 ) objects.BatchSimpleObjects {
 	path := fmt.Sprintf("/indices/%s/shards/%s/objects", indexName, shardName)
 	method := http.MethodDelete
-	url := url.URL{Scheme: "http", Host: hostName, Path: path}
+	value := []string{strconv.FormatUint(schemaVersion, 10)}
+	url := url.URL{
+		Scheme:   "http",
+		Host:     hostName,
+		Path:     path,
+		RawQuery: url.Values{replica.SchemaVersionKey: value}.Encode(),
+	}
 
 	marshalled, err := clusterapi.IndicesPayloads.BatchDeleteParams.Marshal(uuids, dryRun)
 	if err != nil {

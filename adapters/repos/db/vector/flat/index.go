@@ -30,7 +30,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/common"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/compressionhelpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer"
-	"github.com/weaviate/weaviate/entities/schema"
+	schemaConfig "github.com/weaviate/weaviate/entities/schema/config"
 	flatent "github.com/weaviate/weaviate/entities/vectorindex/flat"
 	"github.com/weaviate/weaviate/usecases/floatcomp"
 )
@@ -89,7 +89,8 @@ func New(cfg Config, uc flatent.UserConfig, store *lsmkv.Store) (*flat, error) {
 	}
 	index.initBuckets(context.Background())
 	if uc.BQ.Enabled && uc.BQ.Cache {
-		index.bqCache = cache.NewShardedUInt64LockCache(index.getBQVector, uc.VectorCacheMaxObjects, cfg.Logger, 0)
+		index.bqCache = cache.NewShardedUInt64LockCache(
+			index.getBQVector, uc.VectorCacheMaxObjects, cfg.Logger, 0, cfg.AllocChecker)
 	}
 
 	return index, nil
@@ -629,40 +630,7 @@ func (index *flat) SearchByVectorDistance(vector []float32, targetDistance float
 	return resultIDs, resultDist, nil
 }
 
-func (index *flat) UpdateUserConfig(updated schema.VectorIndexConfig, callback func()) error {
-	if index.pq == nil {
-		go func() {
-			index.Lock()
-			if index.pq == nil {
-				index.logger.Error("++++++++++++++++++++++++++++++++++++++++++++++++++")
-				cursor := index.store.Bucket(index.getBucketName()).Cursor()
-				defer cursor.Close()
-
-				data := make([][]float32, 100000)
-				for key, v := cursor.First(); key != nil; key, v = cursor.Next() {
-					id := binary.BigEndian.Uint64(key)
-					vec := make([]byte, len(v))
-					copy(vec, v)
-					data[int(id)] = make([]float32, len(vec)/4)
-					data[int(id)] = float32SliceFromByteSlice(v, data[int(id)])
-				}
-				for i, v := range data {
-					if len(v) == 0 {
-						index.logger.Error(i, v)
-					}
-				}
-				index.pq = compressionhelpers.NewScalarQuantizer(data, index.distancerProvider)
-				//index.pq.Fit(data)
-				index.pqCache = cache.NewShardedByteLockCache(index.getPQVector, 1000000, index.logger, 0)
-				index.pqCache.Grow(100000)
-				compressionhelpers.Concurrently(index.logger, 100000, func(i uint64) {
-					index.pqCache.Preload(uint64(i), index.pq.Encode(data[i]))
-				})
-				index.logger.Error("------------------------------------------")
-			}
-			index.Unlock()
-		}()
-	}
+func (index *flat) UpdateUserConfig(updated schemaConfig.VectorIndexConfig, callback func()) error {
 	parsed, ok := updated.(flatent.UserConfig)
 	if !ok {
 		callback()
@@ -770,7 +738,7 @@ func validateImmutableField(u immutableParameter,
 	return nil
 }
 
-func ValidateUserConfigUpdate(initial, updated schema.VectorIndexConfig) error {
+func ValidateUserConfigUpdate(initial, updated schemaConfig.VectorIndexConfig) error {
 	initialParsed, ok := initial.(flatent.UserConfig)
 	if !ok {
 		return errors.Errorf("initial is not UserConfig, but %T", initial)

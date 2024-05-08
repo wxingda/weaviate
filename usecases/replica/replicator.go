@@ -181,10 +181,11 @@ func (r *Replicator) PutObjects(ctx context.Context,
 	shard string,
 	objs []*storobj.Object,
 	l ConsistencyLevel,
+	schemaVersion uint64,
 ) []error {
 	coord := newCoordinator[SimpleResponse](r, shard, r.requestID(opPutObjects), r.log)
 	op := func(ctx context.Context, host, requestID string) error {
-		resp, err := r.client.PutObjects(ctx, host, r.class, shard, requestID, objs)
+		resp, err := r.client.PutObjects(ctx, host, r.class, shard, requestID, objs, schemaVersion)
 		if err == nil {
 			err = resp.FirstError()
 		}
@@ -218,11 +219,11 @@ func (r *Replicator) DeleteObjects(ctx context.Context,
 	uuids []strfmt.UUID,
 	dryRun bool,
 	l ConsistencyLevel,
+	schemaVersion uint64,
 ) []objects.BatchSimpleObject {
 	coord := newCoordinator[DeleteBatchResponse](r, shard, r.requestID(opDeleteObjects), r.log)
 	op := func(ctx context.Context, host, requestID string) error {
-		resp, err := r.client.DeleteObjects(
-			ctx, host, r.class, shard, requestID, uuids, dryRun)
+		resp, err := r.client.DeleteObjects(ctx, host, r.class, shard, requestID, uuids, dryRun, schemaVersion)
 		if err == nil {
 			err = resp.FirstError()
 		}

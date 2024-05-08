@@ -32,6 +32,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/objects"
 	"github.com/weaviate/weaviate/usecases/replica"
 	"github.com/weaviate/weaviate/usecases/sharding"
+	shardingConfig "github.com/weaviate/weaviate/usecases/sharding/config"
 )
 
 type fakeSchemaGetter struct {
@@ -41,6 +42,10 @@ type fakeSchemaGetter struct {
 
 func (f *fakeSchemaGetter) GetSchemaSkipAuth() schema.Schema {
 	return f.schema
+}
+
+func (f *fakeSchemaGetter) ReadOnlyClass(class string) *models.Class {
+	return f.schema.GetClass(class)
 }
 
 func (f *fakeSchemaGetter) CopyShardingState(class string) *sharding.State {
@@ -94,7 +99,7 @@ func (f fakeSchemaGetter) ResolveParentNodes(_ string, shard string) (map[string
 }
 
 func singleShardState() *sharding.State {
-	config, err := sharding.ParseConfig(nil, 1)
+	config, err := shardingConfig.ParseConfig(nil, 1)
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +113,7 @@ func singleShardState() *sharding.State {
 }
 
 func multiShardState() *sharding.State {
-	config, err := sharding.ParseConfig(map[string]interface{}{
+	config, err := shardingConfig.ParseConfig(map[string]interface{}{
 		"desiredCount": json.Number("3"),
 	}, 1)
 	if err != nil {
@@ -154,7 +159,7 @@ func (f fakeNodes) LocalName() string {
 
 type fakeRemoteClient struct{}
 
-func (f *fakeRemoteClient) BatchPutObjects(ctx context.Context, hostName, indexName, shardName string, objs []*storobj.Object, repl *additional.ReplicationProperties) []error {
+func (f *fakeRemoteClient) BatchPutObjects(ctx context.Context, hostName, indexName, shardName string, objs []*storobj.Object, repl *additional.ReplicationProperties, schemaVersion uint64) []error {
 	return nil
 }
 
@@ -222,7 +227,7 @@ func (f *fakeRemoteClient) FindUUIDs(ctx context.Context, hostName, indexName, s
 }
 
 func (f *fakeRemoteClient) DeleteObjectBatch(ctx context.Context, hostName, indexName, shardName string,
-	uuids []strfmt.UUID, dryRun bool,
+	uuids []strfmt.UUID, dryRun bool, schemaVersion uint64,
 ) objects.BatchSimpleObjects {
 	return nil
 }
@@ -278,7 +283,7 @@ func (f *fakeReplicationClient) DeleteObject(ctx context.Context, host, index, s
 }
 
 func (f *fakeReplicationClient) PutObjects(ctx context.Context, host, index, shard, requestID string,
-	objs []*storobj.Object,
+	objs []*storobj.Object, schemaVersion uint64,
 ) (replica.SimpleResponse, error) {
 	return replica.SimpleResponse{}, nil
 }
@@ -290,7 +295,7 @@ func (f *fakeReplicationClient) MergeObject(ctx context.Context, host, index, sh
 }
 
 func (f *fakeReplicationClient) DeleteObjects(ctx context.Context, host, index, shard, requestID string,
-	uuids []strfmt.UUID, dryRun bool,
+	uuids []strfmt.UUID, dryRun bool, schemaVersion uint64,
 ) (replica.SimpleResponse, error) {
 	return replica.SimpleResponse{}, nil
 }
