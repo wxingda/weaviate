@@ -17,6 +17,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer/asm"
 )
 
 const (
@@ -36,11 +37,23 @@ var l2SquaredByteImpl func(a, b []byte) uint32 = func(a, b []byte) uint32 {
 	return sum
 }
 
-var dotByteImpl func(a, b []byte) float32 = func(a, b []byte) float32 {
+var dotByteImpl func(a, b []uint8) uint32 = asm.DotByteARM64
+
+/*var dotByteImpl func(a, b []uint8) uint32 = func(a, b []byte) uint32 {
+	var sum uint32
+
+	for i := range a {
+		sum += uint32(a[i]) * uint32(b[i])
+	}
+
+	return sum
+}*/
+
+var dotFloatByteImpl func(a []float32, b []uint8) float32 = func(a []float32, b []uint8) float32 {
 	var sum float32
 
 	for i := range a {
-		sum += float32(a[i]) * float32(b[i])
+		sum += a[i] * float32(b[i])
 	}
 
 	return sum
@@ -70,17 +83,29 @@ func (sq *ScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (float3
 	}
 	switch sq.distancer.Type() {
 	case "l2-squared":
-		return sq.a2 * float32(l2SquaredByteImpl(x[:len(x)-2], y[:len(y)-2])), nil
+		return sq.a2 * float32(l2SquaredByteImpl(x[:len(x)-4], y[:len(y)-4])), nil
 	case "dot":
-		return -(sq.a2*float32(dotByteImpl(x[:len(x)-2], y[:len(y)-2])) + sq.ab*float32(sq.norm(x)+sq.norm(y)) + sq.ib2), nil
+		return -(sq.a2*float32(dotByteImpl(x[:len(x)-4], y[:len(y)-4])) + sq.ab*float32(sq.norm(x)+sq.norm(y)) + sq.ib2), nil
 	case "cosine-dot":
-		return 1 - (sq.a2*float32(dotByteImpl(x[:len(x)-2], y[:len(y)-2])) + sq.ab*float32(sq.norm(x)+sq.norm(y)) + sq.ib2), nil
+		return 1 - (sq.a2*float32(dotByteImpl(x[:len(x)-4], y[:len(y)-4])) + sq.ab*float32(sq.norm(x)+sq.norm(y)) + sq.ib2), nil
+	}
+	return 0, errors.Errorf("Distance not supported yet %s", sq.distancer)
+}
+
+func (sq *ScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors2(x []float32, encoded []byte, normX float32) (float32, error) {
+	switch sq.distancer.Type() {
+	case "dot":
+		return -(sq.a/codes*float32(dotFloatByteImpl(x, encoded[:len(encoded)-4])) + sq.b*normX), nil
 	}
 	return 0, errors.Errorf("Distance not supported yet %s", sq.distancer)
 }
 
 func (sq *ScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors(x []float32, encoded []byte) (float32, error) {
-	return sq.DistanceBetweenCompressedVectors(sq.Encode(x), encoded)
+	switch sq.distancer.Type() {
+	case "dot":
+		return -(sq.a/codes*float32(dotFloatByteImpl(x, encoded[:len(encoded)-4])) + sq.b*float32(sq.norm(encoded))), nil
+	}
+	return 0, errors.Errorf("Distance not supported yet %s", sq.distancer)
 }
 
 func NewScalarQuantizer(data [][]float32, distance distancer.Provider) *ScalarQuantizer {
@@ -134,18 +159,24 @@ type SQDistancer struct {
 	x          []float32
 	sq         *ScalarQuantizer
 	compressed []byte
+	normX      float32
 }
 
 func (sq *ScalarQuantizer) NewDistancer(a []float32) *SQDistancer {
+	sum := float32(0)
+	for _, x := range a {
+		sum += x
+	}
 	return &SQDistancer{
 		x:          a,
 		sq:         sq,
 		compressed: sq.Encode(a),
+		normX:      sum,
 	}
 }
 
 func (d *SQDistancer) Distance(x []byte) (float32, bool, error) {
-	dist, err := d.sq.DistanceBetweenCompressedVectors(d.compressed, x)
+	dist, err := d.sq.DistanceBetweenCompressedAndUncompressedVectors2(d.x, x, d.normX)
 	return dist, err == nil, err
 }
 
@@ -185,7 +216,7 @@ func (sq *ScalarQuantizer) ExposeFields() PQData {
 }
 
 func (sq *ScalarQuantizer) norm(code []byte) uint32 {
-	return binary.BigEndian.Uint32(code[len(code)-2:])
+	return binary.BigEndian.Uint32(code[len(code)-4:])
 }
 
 type LaScalarQuantizer struct {
@@ -268,7 +299,7 @@ func (lasq *LaScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (fl
 	yNorm := float32(lasq.norm(y))
 	x = x[:lasq.dims]
 	y = y[:lasq.dims]
-	sum := ax*ay*dotByteImpl(x, y) + ax*by*xNorm + ay*bx*yNorm + ax*LAQDotImpl(lasq.means, x) + ay*LAQDotImpl(lasq.means, y) + (bx+by)*lasq.meansAcc + float32(len(x))*bx*by
+	sum := ax*ay*float32(dotByteImpl(x, y)) + ax*by*xNorm + ay*bx*yNorm + ax*LAQDotImpl(lasq.means, x) + ay*LAQDotImpl(lasq.means, y) + (bx+by)*lasq.meansAcc + float32(len(x))*bx*by
 	return -sum, nil
 }
 

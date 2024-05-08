@@ -206,11 +206,11 @@ func Test_Encoders(t *testing.T) {
 
 	logger := logrus.New()
 	distancer := distancer.NewDotProductProvider()
-	/*quantizer := NewLocallyAdaptiveScalarQuantizer(data, distancer)
+	quantizer := NewScalarQuantizer(data, distancer)
 
 	Concurrently(logger, uint64(len(data)), func(i uint64) {
 		compressed[i] = quantizer.Encode(data[i])
-	})*/
+	})
 	k := 10
 
 	var relevant uint64
@@ -219,12 +219,13 @@ func Test_Encoders(t *testing.T) {
 	Concurrently(logger, uint64(len(testData)), func(i uint64) {
 		heap := priorityqueue.NewMax[any](k)
 		//cd := quantizer.NewDistancer(testData[i])
-		//cq := quantizer.Encode(testData[i])
+		cq := quantizer.Encode(testData[i])
 		for j := range compressed {
 			before := time.Now()
 			//d, _, _ := cd.Distance(compressed[j])
 			//d, _ := quantizer.DistanceBetweenCompressedAndUncompressedVectors(testData[i], compressed[j])
-			d, _, _ := distancer.SingleDist(testData[i], data[j])
+			d, _ := quantizer.DistanceBetweenCompressedVectors(cq, compressed[j])
+			//d, _, _ := distancer.SingleDist(testData[i], data[j])
 			ell := time.Since(before)
 			mutex.Lock()
 			ellapsed += ell
