@@ -118,6 +118,10 @@ type Bucket struct {
 	// optionally supplied to prevent starting memory-intensive
 	// processes when memory pressure is high
 	allocChecker memwatch.AllocChecker
+
+	// optional segment size limit. If set, a compaction will skip segments that
+	// sum to more than the specified value.
+	maxSegmentSize int64
 }
 
 func NewBucketCreator() *Bucket { return &Bucket{} }
@@ -178,6 +182,7 @@ func (*Bucket) NewBucket(ctx context.Context, dir, rootDir string, logger logrus
 			forceCompaction:       b.forceCompaction,
 			useBloomFilter:        b.useBloomFilter,
 			calcCountNetAdditions: b.calcCountNetAdditions,
+			maxSegmentSize:        b.maxSegmentSize,
 		}, b.allocChecker)
 	if err != nil {
 		return nil, fmt.Errorf("init disk segments: %w", err)

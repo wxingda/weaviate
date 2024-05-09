@@ -112,9 +112,9 @@ type Config struct {
 	RecoveryTimeout  time.Duration
 	SnapshotInterval time.Duration
 	BootstrapTimeout time.Duration
-	// UpdateWaitTimeout Timeout duration for waiting for the update to be propagated to this follower node.
-	UpdateWaitTimeout time.Duration
-	SnapshotThreshold uint64
+	// ConsistencyWaitTimeout is the duration we will wait for a schema version to land on that node
+	ConsistencyWaitTimeout time.Duration
+	SnapshotThreshold      uint64
 
 	DB            Indexer
 	Parser        Parser
@@ -149,9 +149,8 @@ type Store struct {
 
 	// applyTimeout timeout limit the amount of time raft waits for a command to be started
 	applyTimeout time.Duration
-
-	// UpdateWaitTimeout Timeout duration for waiting for the update to be propagated to this follower node.
-	updateWaitTimeout time.Duration
+	// consistencyWaitTimeout is the duration we will wait for a schema version to land on that node
+	consistencyWaitTimeout time.Duration
 
 	nodeID        string
 	host          string
@@ -191,25 +190,25 @@ type Store struct {
 
 func New(cfg Config) Store {
 	return Store{
-		raftDir:           cfg.WorkDir,
-		raftPort:          cfg.RaftPort,
-		voter:             cfg.Voter,
-		bootstrapExpect:   cfg.BootstrapExpect,
-		candidates:        make(map[string]string, cfg.BootstrapExpect),
-		recoveryTimeout:   cfg.RecoveryTimeout,
-		heartbeatTimeout:  cfg.HeartbeatTimeout,
-		electionTimeout:   cfg.ElectionTimeout,
-		snapshotInterval:  cfg.SnapshotInterval,
-		snapshotThreshold: cfg.SnapshotThreshold,
-		updateWaitTimeout: cfg.UpdateWaitTimeout,
-		applyTimeout:      time.Second * 20,
-		nodeID:            cfg.NodeID,
-		host:              cfg.Host,
-		addResolver:       newAddrResolver(&cfg),
-		db:                &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser, cfg.Logger},
-		log:               cfg.Logger,
-		logLevel:          cfg.LogLevel,
-		logJsonFormat:     cfg.LogJSONFormat,
+		raftDir:                cfg.WorkDir,
+		raftPort:               cfg.RaftPort,
+		voter:                  cfg.Voter,
+		bootstrapExpect:        cfg.BootstrapExpect,
+		candidates:             make(map[string]string, cfg.BootstrapExpect),
+		recoveryTimeout:        cfg.RecoveryTimeout,
+		heartbeatTimeout:       cfg.HeartbeatTimeout,
+		electionTimeout:        cfg.ElectionTimeout,
+		snapshotInterval:       cfg.SnapshotInterval,
+		snapshotThreshold:      cfg.SnapshotThreshold,
+		consistencyWaitTimeout: cfg.ConsistencyWaitTimeout,
+		applyTimeout:           time.Second * 20,
+		nodeID:                 cfg.NodeID,
+		host:                   cfg.Host,
+		addResolver:            newAddrResolver(&cfg),
+		db:                     &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser, cfg.Logger},
+		log:                    cfg.Logger,
+		logLevel:               cfg.LogLevel,
+		logJsonFormat:          cfg.LogJSONFormat,
 
 		// if true voters will only serve schema
 		metadataOnlyVoters: cfg.MetadataOnlyVoters,
@@ -448,7 +447,7 @@ func (st *Store) WaitForAppliedIndex(ctx context.Context, period time.Duration, 
 	if idx := st.lastAppliedIndex.Load(); idx >= version {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, st.updateWaitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, st.consistencyWaitTimeout)
 	defer cancel()
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
@@ -768,7 +767,6 @@ func (st *Store) Remove(id string) error {
 // Notify signals this Store that a node is ready for bootstrapping at the specified address.
 // Bootstrapping will be initiated once the number of known nodes reaches the expected level,
 // which includes this node.
-
 func (st *Store) Notify(id, addr string) (err error) {
 	if !st.open.Load() {
 		return ErrNotOpen
@@ -784,9 +782,10 @@ func (st *Store) Notify(id, addr string) (err error) {
 	st.candidates[id] = addr
 	if len(st.candidates) < st.bootstrapExpect {
 		st.log.WithFields(logrus.Fields{
+			"action": "bootstrap",
 			"expect": st.bootstrapExpect,
 			"got":    st.candidates,
-		}).Debug("number of candidates")
+		}).Debug("number of candidates lower than bootstrap expect param, stopping notify")
 		return nil
 	}
 	candidates := make([]raft.Server, 0, len(st.candidates))
@@ -801,11 +800,14 @@ func (st *Store) Notify(id, addr string) (err error) {
 		i++
 	}
 
-	st.log.WithField("candidates", candidates).Info("starting cluster bootstrapping")
+	st.log.WithFields(logrus.Fields{
+		"action":     "bootstrap",
+		"candidates": candidates,
+	}).Info("starting cluster bootstrapping")
 
 	fut := st.raft.BootstrapCluster(raft.Configuration{Servers: candidates})
 	if err := fut.Error(); err != nil {
-		st.log.WithError(err).Error("bootstrapping cluster")
+		st.log.WithField("action", "bootstrap").WithError(err).Error("could not bootstrapping cluster")
 		if !errors.Is(err, raft.ErrCantBootstrap) {
 			return err
 		}
