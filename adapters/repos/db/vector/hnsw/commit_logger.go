@@ -442,6 +442,20 @@ func (l *hnswCommitLogger) SwitchCommitLogs(force bool) error {
 	return err
 }
 
+func (l *hnswCommitLogger) CombineAndCondenseLogs() error {
+	_, err := l.combineLogs()
+	if err != nil {
+		return errors.Wrap(err, "combine logs")
+	}
+
+	_, err = l.condenseOldLogs()
+	if err != nil {
+		return errors.Wrap(err, "condense logs")
+	}
+
+	return nil
+}
+
 func (l *hnswCommitLogger) switchCommitLogs(force bool) (bool, error) {
 	l.Lock()
 	defer l.Unlock()
