@@ -103,11 +103,15 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 			}
 		}
 		// No pruning at higher levels
-	} else {
-		if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
-			return errors.Wrap(err, "heuristic")
-		}
 	}
+	/*
+		// testing ACORN-1
+		else {
+			if err := n.graph.selectNeighborsHeuristic(results, max, n.denyList); err != nil {
+				return errors.Wrap(err, "heuristic")
+			}
+		}
+	*/
 
 	n.graph.insertMetrics.findAndConnectHeuristic(before)
 	before = time.Now()
@@ -122,6 +126,11 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 	}
 
 	n.graph.pools.pqResults.Put(results) // Put this back so the next thread can use it, brilliant
+
+	// ACORN-1: Keep all neighbors up to maxConnections
+	if len(neighbors) > max {
+		neighbors = neighbors[:max]
+	}
 
 	// set all outgoing in one go
 	n.node.setConnectionsAtLevel(level, neighbors)

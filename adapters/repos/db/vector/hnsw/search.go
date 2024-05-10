@@ -1110,7 +1110,6 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 	if err != nil {
 		return nil, errors.Wrapf(err, "calculate distance of current last result")
 	}
-	connectionsReusable := make([]uint64, h.maximumConnectionsLayerZero*h.acornGamma) // could be this
 
 	for candidates.Len() > 0 {
 		var dist float32
@@ -1135,48 +1134,38 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 			continue
 		}
 
-		// This is maybe not the most elegant way of doing it -- we could alternately do this in the `for _, neighborID := range connectionsReusable` below ?
-		neighbors := make([]uint64, 0, len(candidateNode.connections[level]))
-		compressionHeuristic := false
-		if compressionHeuristic {
-			for i, neighborID := range candidateNode.connections[level] {
-				if i < h.acornMBeta {
-					if allowList.Contains(neighborID) {
-						neighbors = append(neighbors, neighborID)
-					}
-				} else {
-					neighborNode := h.nodes[neighborID]
-					if neighborNode != nil {
-						//neighborNode.RLock()
-						// Workaround, the first ~150 (multi-threading) nodes cannot have >MBeta neighbors
-						for _, neighborOfNeighborID := range h.nodes[neighborID].connections[level] {
-							if allowList.Contains(neighborOfNeighborID) {
-								neighbors = append(neighbors, neighborOfNeighborID)
-							}
+		// ACORN-1: Expand the search to include neighbors and neighbors of neighbors
+		expandedNeighbors := make([]uint64, 0)
+		for _, neighborID := range candidateNode.connections[level] {
+			expandedNeighbors = append(expandedNeighbors, neighborID)
+
+			h.shardedNodeLocks.RLock(neighborID)
+			neighborNode := h.nodes[neighborID]
+			h.shardedNodeLocks.RUnlock(neighborID)
+
+			if neighborNode != nil {
+				neighborNode.Lock()
+				if neighborNode.level >= level {
+					for _, neighborOfNeighborID := range neighborNode.connections[level] {
+						if ok := visited.Visited(neighborOfNeighborID); !ok {
+							expandedNeighbors = append(expandedNeighbors, neighborOfNeighborID)
 						}
 					}
-					//neighborNode.RUnlock()
 				}
-			}
-		} else {
-			for _, neighborID := range candidateNode.connections[level] {
-				if allowList.Contains(neighborID) {
-					neighbors = append(neighbors, neighborID)
-				}
+				neighborNode.Unlock()
 			}
 		}
-		neighbors = neighbors[:min(len(neighbors), h.maximumConnections)]
-		connectionsReusable = connectionsReusable[:len(neighbors)]
-
-		copy(connectionsReusable, neighbors)
 		candidateNode.Unlock()
 
-		for _, neighborID := range connectionsReusable {
+		for _, neighborID := range expandedNeighbors {
 			if ok := visited.Visited(neighborID); ok {
+				// skip if we've already visited this neighbor
 				continue
 			}
 
+			// mark the neighbor as visited
 			visited.Visit(neighborID)
+
 			var distance float32
 			var ok bool
 			var err error
@@ -1185,42 +1174,37 @@ func (h *hnsw) acornSearchLayer(queryVector []float32,
 			} else {
 				distance, ok, err = h.distanceToFloatNode(floatDistancer, neighborID)
 			}
+
 			if err != nil {
-				return nil, errors.Wrap(err, "calculate distance between candidate and query")
-			}
-
-			if !ok {
-				// node was deleted in the underlying object store
-				continue
-			}
-
-			if distance < worstResultDistance || results.Len() < ef {
-				// These neighbors are already filtered such that they are on the allowList.
-				candidates.Insert(neighborID, distance) // the neighborID has already been filtered
-
-				if h.hasTombstone(neighborID) {
+				var e storobj.ErrNotFound
+				if errors.As(err, &e) {
+					h.handleDeletedNode(e.DocID)
 					continue
-				}
-
-				results.Insert(neighborID, distance)
-
-				if h.compressed.Load() {
-					if candidates.Len() > 0 {
-						h.compressedVectorsCache.Prefetch(candidates.Top().ID)
-					}
 				} else {
-					if candidates.Len() > 0 {
+					if err != nil {
+						return nil, errors.Wrap(err, "calculate distance between candidate and query")
+					}
+				}
+			}
+
+			if ok && (distance < worstResultDistance || results.Len() < ef) {
+				candidates.Insert(neighborID, distance)
+				if (level == 0 && allowList != nil && allowList.Contains(neighborID) || level > 0) && !h.hasTombstone(neighborID) {
+					results.Insert(neighborID, distance)
+
+					if h.compressed.Load() {
+						h.compressedVectorsCache.Prefetch(candidates.Top().ID)
+					} else {
 						h.cache.Prefetch(candidates.Top().ID)
 					}
-				}
 
-				// +1 because we have added one node size calculating the len
-				if results.Len() > ef {
-					results.Pop()
-				}
+					if results.Len() > ef {
+						results.Pop()
+					}
 
-				if results.Len() > 0 {
-					worstResultDistance = results.Top().Dist
+					if results.Len() > 0 {
+						worstResultDistance = results.Top().Dist
+					}
 				}
 			}
 		}

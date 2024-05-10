@@ -38,10 +38,12 @@ import (
 
 var HNSW_EFG *bool
 var ACORN *bool
+var ACORN_Search *bool
 
 func init() {
 	HNSW_EFG = flag.Bool("HNSW_EFG", false, "Enable HNSW-EFG")
 	ACORN = flag.Bool("ACORN", false, "Enable ACORN")
+	ACORN_Search = flag.Bool("ACORN_Search", false, "Enable ACORN Search")
 	go func() {
 		runtime.SetBlockProfileRate(1)
 		http.ListenAndServe("localhost:6060", nil)
@@ -85,8 +87,17 @@ func TestFilteredRecall(t *testing.T) {
 		fmt.Println("Running ACORN")
 		acorn = true
 	} else {
-		fmt.Println("Running HNSW withou ACORN")
+		fmt.Println("Running HNSW without ACORN")
 		acorn = false
+	}
+
+	var acorn_search bool
+	if *ACORN_Search {
+		fmt.Println("Running HNSW with ACORN-1 Search")
+		acorn_search = true
+	} else {
+		fmt.Println("Running HNSW without ACORN Search")
+		acorn_search = false
 	}
 
 	/* DATA STUCTURES FOR TESTING */
@@ -108,7 +119,7 @@ func TestFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		fmt.Println("Loading vectors...")
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
-		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-100K-2-99_0.json")
+		indexFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/indexFilters-100K-2-95_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(indexFiltersJSON, &indexFilters)
 		require.Nil(t, err)
@@ -123,14 +134,14 @@ func TestFilteredRecall(t *testing.T) {
 		require.Nil(t, err)
 		/* ADD THE FILTERS -- TODO: TEST MORE THAN 1 FILTER % PER RUN */
 		fmt.Println("Loading vectors...")
-		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-100K-2-99_0.json")
+		queryFiltersJSON, err := ioutil.ReadFile("./datasets/filtered/queryFilters-100K-2-95_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(queryFiltersJSON, &queryFilters)
 		/* MERGE QUERY VECTORS WITH FILTERS */
 		queryVectorsWithFilters := mergeData(queryVectors, queryFilters)
 		/* LOAD GROUND TRUTHS */
 		fmt.Println("Loading vectors...")
-		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered_recall_truths-100K-2-99_0.json")
+		truthsJSON, err := ioutil.ReadFile("./datasets/filtered/filtered_recall_truths-100K-2-95_0.json")
 		require.Nil(t, err)
 		err = json.Unmarshal(truthsJSON, &truths)
 		require.Nil(t, err)
@@ -139,7 +150,7 @@ func TestFilteredRecall(t *testing.T) {
 		/* INITIALIZE INDEX */
 		/* HNSW PARAMETERS */
 		efConstruction := 256
-		ef := 256
+		ef := 128
 		maxNeighbors := 64 // may need to pump this up for 99%
 		acornGamma := 20   // recommend to set as 1 / selectivity, so:
 		/*
@@ -322,7 +333,7 @@ func TestFilteredRecall(t *testing.T) {
 				} else {
 					results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 				}
-			} else if acorn {
+			} else if acorn || acorn_search {
 				//results, _, err = vectorIndex.SearchByVector(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 				results, _, err = vectorIndex.ACORNSearch(queryVectorsWithFilters[i].Vector, k, queryAllowList)
 			} else {
