@@ -421,14 +421,14 @@ func (l *hnswCommitLogger) startSwitchLogs(shouldAbort cyclemanager.ShouldAbortC
 }
 
 func (l *hnswCommitLogger) startCombineAndCondenseLogs(shouldAbort cyclemanager.ShouldAbortCallback) bool {
-	executed1, err := l.combineLogs()
+	executed1, err := l.CombineLogs()
 	if err != nil {
 		l.logger.WithError(err).
 			WithField("action", "hnsw_commit_log_combining").
 			Error("hnsw commit log maintenance (combining) failed")
 	}
 
-	executed2, err := l.condenseOldLogs()
+	executed2, err := l.CondenseOldLogs()
 	if err != nil {
 		l.logger.WithError(err).
 			WithField("action", "hnsw_commit_log_condensing").
@@ -443,12 +443,12 @@ func (l *hnswCommitLogger) SwitchCommitLogs(force bool) error {
 }
 
 func (l *hnswCommitLogger) CombineAndCondenseLogs() (bool, error) {
-	executed1, err := l.combineLogs()
+	executed1, err := l.CombineLogs()
 	if err != nil {
 		return false, errors.Wrap(err, "combine logs")
 	}
 
-	executed2, err := l.condenseOldLogs()
+	executed2, err := l.CondenseOldLogs()
 	if err != nil {
 		return false, errors.Wrap(err, "condense logs")
 	}
@@ -508,7 +508,7 @@ func (l *hnswCommitLogger) switchCommitLogs(force bool) (bool, error) {
 	return true, nil
 }
 
-func (l *hnswCommitLogger) condenseOldLogs() (bool, error) {
+func (l *hnswCommitLogger) CondenseOldLogs() (bool, error) {
 	files, err := getCommitFileNames(l.rootPath, l.id)
 	if err != nil {
 		return false, err
@@ -559,7 +559,7 @@ func (l *hnswCommitLogger) condenseOldLogs() (bool, error) {
 	return false, nil
 }
 
-func (l *hnswCommitLogger) combineLogs() (bool, error) {
+func (l *hnswCommitLogger) CombineLogs() (bool, error) {
 	// maxSize is the desired final size, since we assume a lot of redundancy we
 	// can set the combining threshold higher than the final threshold under the
 	// assumption that the combined file will be considerably smaller than the
