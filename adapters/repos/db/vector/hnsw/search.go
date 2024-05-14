@@ -267,7 +267,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				nodeId := candidateNode.connections[level][index]
 				index++
 
-				if allowList.Contains(nodeId) && !visitedExp.Visited(nodeId) {
+				if allowList.Contains(nodeId) && !visitedExp.Visited(nodeId) && !visited.Visited(nodeId) {
 					visitedExp.Visit(nodeId)
 					connectionsReusable[realLen] = nodeId
 					realLen++
@@ -281,7 +281,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 					continue
 				}
 				for _, expId := range node.connections[level] {
-					if visitedExp.Visited(expId) {
+					if visitedExp.Visited(expId) || visited.Visited(expId) {
 						continue
 					}
 					visitedExp.Visit(expId)
@@ -308,9 +308,9 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				// skip if we've already visited this neighbor
 				continue
 			}
-
 			// make sure we never visit this neighbor again
 			visited.Visit(neighborID)
+
 			var distance float32
 			var ok bool
 			var err error
