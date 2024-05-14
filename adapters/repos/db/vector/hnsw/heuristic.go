@@ -21,7 +21,7 @@ import (
 )
 
 func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
-	max int, denyList helpers.AllowList,
+	max int, denyList helpers.AllowList, level int,
 ) error {
 	if input.Len() < max {
 		return nil
@@ -82,41 +82,63 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 
 		returnList = h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
 
+		h.pools.visitedListsLock.RLock()
+		visited := h.pools.visitedLists.Borrow()
+		h.pools.visitedListsLock.RUnlock()
 		for closestFirst.Len() > 0 && len(returnList) < max {
 			curr := closestFirst.Pop()
 			if denyList != nil && denyList.Contains(curr.ID) {
 				continue
 			}
-			distToQuery := curr.Dist
-
-			currVec := vecs[curr.Value]
-			if err := errs[curr.Value]; err != nil {
-				var e storobj.ErrNotFound
-				if errors.As(err, &e) {
-					h.handleDeletedNode(e.DocID)
+			if level == 0 && h.acornSearch {
+				if !visited.Visited(curr.ID) {
+					visited.Visit(curr.ID)
+					returnList = append(returnList, curr)
+				}
+				node := h.nodes[curr.ID]
+				if node == nil {
 					continue
-				} else {
-					// not a typed error, we can recover from, return with err
-					return errors.Wrapf(err,
-						"unrecoverable error for docID %d", curr.ID)
+				}
+
+				for _, id := range node.connections[level] {
+					visited.Visit(id)
+				}
+			} else {
+				distToQuery := curr.Dist
+
+				currVec := vecs[curr.Value]
+				if err := errs[curr.Value]; err != nil {
+					var e storobj.ErrNotFound
+					if errors.As(err, &e) {
+						h.handleDeletedNode(e.DocID)
+						continue
+					} else {
+						// not a typed error, we can recover from, return with err
+						return errors.Wrapf(err,
+							"unrecoverable error for docID %d", curr.ID)
+					}
+				}
+
+				good := true
+				for _, item := range returnList {
+					peerDist, _, _ := h.distancerProvider.SingleDist(currVec,
+						vecs[item.Value])
+
+					if peerDist < distToQuery {
+
+						good = false
+						break
+					}
+				}
+
+				if good {
+					returnList = append(returnList, curr)
 				}
 			}
-			good := true
-			for _, item := range returnList {
-				peerDist, _, _ := h.distancerProvider.SingleDist(currVec,
-					vecs[item.Value])
-
-				if peerDist < distToQuery {
-					good = false
-					break
-				}
-			}
-
-			if good {
-				returnList = append(returnList, curr)
-			}
-
 		}
+		h.pools.visitedListsLock.RLock()
+		h.pools.visitedLists.Return(visited)
+		h.pools.visitedListsLock.RUnlock()
 	}
 
 	h.pools.pqHeuristic.Put(closestFirst)

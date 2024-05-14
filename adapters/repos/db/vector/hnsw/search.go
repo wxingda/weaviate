@@ -235,7 +235,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			continue
 		}
 
-		if allowList == nil || !h.acornSearch {
+		if level > 0 || allowList == nil || !h.acornSearch {
 			if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero {
 				// How is it possible that we could ever have more connections than the
 				// allowed maximum? It is not anymore, but there was a bug that allowed
@@ -266,12 +266,9 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			for index < len(candidateNode.connections[level]) && realLen < h.maximumConnectionsLayerZero {
 				nodeId := candidateNode.connections[level][index]
 				index++
-				if visitedExp.Visited(nodeId) {
-					continue
-				}
-				visitedExp.Visit(nodeId)
 
-				if allowList.Contains(nodeId) {
+				if allowList.Contains(nodeId) && !visitedExp.Visited(nodeId) {
+					visitedExp.Visit(nodeId)
 					connectionsReusable[realLen] = nodeId
 					realLen++
 					if realLen >= h.maximumConnectionsLayerZero-1 {

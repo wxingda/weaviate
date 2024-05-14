@@ -230,7 +230,7 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 		before = time.Now()
 	}
 
-	if err := n.graph.selectNeighborsHeuristic(results, maxConnections-total, n.denyList); err != nil {
+	if err := n.graph.selectNeighborsHeuristic(results, maxConnections-total, n.denyList, level); err != nil {
 		return errors.Wrap(err, "heuristic")
 	}
 
@@ -331,7 +331,7 @@ func (n *neighborFinderConnector) connectNeighborAtLevel(neighborID uint64,
 			candidates.Insert(existingConnection, dist)
 		}
 
-		err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList)
+		err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList, level)
 		if err != nil {
 			return errors.Wrap(err, "connect neighbors")
 		}
