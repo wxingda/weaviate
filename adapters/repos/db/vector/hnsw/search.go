@@ -205,6 +205,11 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 		return nil, errors.Wrapf(err, "calculate distance of current last result")
 	}
 	connectionsReusable := make([]uint64, h.maximumConnectionsLayerZero)
+	expandedConnections := make([]uint64, h.maximumConnectionsLayerZero)
+
+	h.pools.visitedListsLock.RLock()
+	visitedExp := h.pools.visitedLists.Borrow()
+	h.pools.visitedListsLock.RUnlock()
 
 	for candidates.Len() > 0 {
 		var dist float32
@@ -235,25 +240,59 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			continue
 		}
 
-		if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero {
-			// How is it possible that we could ever have more connections than the
-			// allowed maximum? It is not anymore, but there was a bug that allowed
-			// this to happen in versions prior to v1.12.0:
-			// https://github.com/weaviate/weaviate/issues/1868
-			//
-			// As a result the length of this slice is entirely unpredictable and we
-			// can no longer retrieve it from the pool. Instead we need to fallback
-			// to allocating a new slice.
-			//
-			// This was discovered as part of
-			// https://github.com/weaviate/weaviate/issues/1897
-			connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
-		} else {
-			connectionsReusable = connectionsReusable[:len(candidateNode.connections[level])]
-		}
+		connectionsReusable = make([]uint64, h.maximumConnectionsLayerZero)
 
 		copy(connectionsReusable, candidateNode.connections[level])
 		candidateNode.Unlock()
+
+		if allowList != nil && level == 0 {
+			var filterIndex = 0
+			for _, neighborID := range connectionsReusable {
+				if filterIndex >= h.maximumConnectionsLayerZero {
+					break
+				}
+				if visitedExp.Visited(neighborID) {
+					continue
+				}
+				visitedExp.Visit(neighborID)
+				if allowList.Contains(neighborID) {
+					connectionsReusable[filterIndex] = neighborID
+					filterIndex++
+				}
+
+				h.shardedNodeLocks.RLock(neighborID)
+				candidateNode := h.nodes[neighborID]
+				h.shardedNodeLocks.RUnlock(neighborID)
+				if candidateNode == nil {
+					continue
+				}
+				candidateNode.Lock()
+				if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero {
+					expandedConnections = make([]uint64, len(candidateNode.connections[level]))
+				} else {
+					expandedConnections = expandedConnections[:len(candidateNode.connections[level])]
+				}
+				copy(expandedConnections, candidateNode.connections[level])
+				candidateNode.Unlock()
+
+				for _, childNeighborID := range expandedConnections {
+					if filterIndex >= h.maximumConnectionsLayerZero {
+						break
+					}
+					if visitedExp.Visited(childNeighborID) {
+						continue
+					}
+					visitedExp.Visit(childNeighborID)
+					if allowList.Contains(childNeighborID) {
+						connectionsReusable[filterIndex] = childNeighborID
+						filterIndex++
+					}
+				}
+			}
+			// set connections reusable to the union of the filtered connections and the remaining connections
+			connectionsReusable = connectionsReusable[:filterIndex]
+
+		}
 
 		for _, neighborID := range connectionsReusable {
 
@@ -507,7 +546,7 @@ func (h *hnsw) knnSearchByVector(searchVec []float32, k int,
 		eps := priorityqueue.NewMin[any](10)
 		eps.Insert(entryPointID, entryPointDistance)
 
-		res, err := h.searchLayerByVectorWithDistancer(searchVec, eps, 1, level, nil, compressorDistancer)
+		res, err := h.searchLayerByVectorWithDistancer(searchVec, eps, 1, level, allowList, compressorDistancer)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "knn search: search layer at level %d", level)
 		}
