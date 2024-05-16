@@ -255,7 +255,9 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 			copy(connectionsReusable, candidateNode.connections[level])
 		} else {
-			connectionsReusable = make([]uint64, h.maximumConnectionsLayerZero)
+			slice := h.pools.tempVectorsUint64.Get(10 * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero)
+			defer h.pools.tempVectorsUint64.Put(slice)
+			connectionsReusable = slice.Slice
 
 			realLen := 0
 			index := 0
@@ -263,7 +265,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			visitedExp := h.pools.visitedLists.Borrow()
 			h.pools.visitedListsLock.RUnlock()
 
-			for index < len(candidateNode.connections[level]) && realLen < h.maximumConnectionsLayerZero {
+			for index < len(candidateNode.connections[level]) {
 				nodeId := candidateNode.connections[level][index]
 				index++
 
@@ -271,9 +273,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 					visitedExp.Visit(nodeId)
 					connectionsReusable[realLen] = nodeId
 					realLen++
-					if realLen >= h.maximumConnectionsLayerZero-1 {
-						break
-					}
 				}
 
 				node := h.nodes[nodeId]
@@ -289,9 +288,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 					if allowList.Contains(expId) {
 						connectionsReusable[realLen] = expId
 						realLen++
-						if realLen >= h.maximumConnectionsLayerZero-1 {
-							break
-						}
 					}
 				}
 			}
