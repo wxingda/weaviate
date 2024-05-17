@@ -204,7 +204,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 	if err != nil {
 		return nil, errors.Wrapf(err, "calculate distance of current last result")
 	}
-	connectionsReusable := make([]uint64, h.maximumConnectionsLayerZero)
 
 	for candidates.Len() > 0 {
 		var dist float32
@@ -250,6 +249,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				// https://github.com/weaviate/weaviate/issues/1897
 				connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
 			} else {
+				connectionsReusable := make([]uint64, len(candidateNode.conncetions[level]) // change from 5/17 session
 				connectionsReusable = connectionsReusable[:len(candidateNode.connections[level])]
 			}
 
