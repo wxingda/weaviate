@@ -204,6 +204,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 	if err != nil {
 		return nil, errors.Wrapf(err, "calculate distance of current last result")
 	}
+	var connectionsReusable []uint64
 
 	for candidates.Len() > 0 {
 		var dist float32
@@ -235,24 +236,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 		}
 
 		if level > 0 || allowList == nil || !h.acornSearch {
-			if len(candidateNode.connections[level]) > h.maximumConnectionsLayerZero {
-				// How is it possible that we could ever have more connections than the
-				// allowed maximum? It is not anymore, but there was a bug that allowed
-				// this to happen in versions prior to v1.12.0:
-				// https://github.com/weaviate/weaviate/issues/1868
-				//
-				// As a result the length of this slice is entirely unpredictable and we
-				// can no longer retrieve it from the pool. Instead we need to fallback
-				// to allocating a new slice.
-				//
-				// This was discovered as part of
-				// https://github.com/weaviate/weaviate/issues/1897
-				connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
-			} else {
-				connectionsReusable := make([]uint64, len(candidateNode.conncetions[level]) // change from 5/17 session
-				connectionsReusable = connectionsReusable[:len(candidateNode.connections[level])]
-			}
-
+			connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
 			copy(connectionsReusable, candidateNode.connections[level])
 		} else {
 			slice := h.pools.tempVectorsUint64.Get(10 * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero)
@@ -334,14 +318,13 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 			if distance < worstResultDistance || results.Len() < ef {
 				candidates.Insert(neighborID, distance)
-				if level == 0 && allowList != nil {
+				if level == 0 && !h.acornSearch && allowList != nil {
 					// we are on the lowest level containing the actual candidates and we
 					// have an allow list (i.e. the user has probably set some sort of a
 					// filter restricting this search further. As a result we have to
 					// ignore items not on the list
 					if !allowList.Contains(neighborID) {
 						continue
-
 					}
 				}
 				if h.hasTombstone(neighborID) {
