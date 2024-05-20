@@ -1,7 +1,11 @@
 {
+  "servers": [
+      {
+        "url": "http://localhost:8080/v1"
+      }
+  ],
   "basePath": "/v1",
   "consumes": [
-    "application/yaml",
     "application/json"
   ],
   "definitions": {
@@ -129,7 +133,7 @@
       }
     },
     "C11yVector": {
-      "description": "A Vector in the Contextionary",
+      "description": "A vector representation of the object. If provided at object creation, this wil take precedence over any vectorizer setting.",
       "type": "array",
       "items": {
         "type": "number",
@@ -137,7 +141,7 @@
       }
     },
     "Vector": {
-      "description": "A Vector object",
+      "description": "A vector representation of the object. If provided at object creation, this wil take precedence over any vectorizer setting.",
       "type": "array",
       "items": {
         "type": "number",
@@ -145,7 +149,7 @@
       }
     },
     "Vectors": {
-      "description": "A Multi Vector map of named vectors",
+      "description": "A map of named vectors for multi-vector representations.",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/Vector"
@@ -351,6 +355,7 @@
       "description": "Configure the inverted index built into Weaviate",
       "properties": {
         "cleanupIntervalSeconds": {
+          "default": 60,
           "description": "Asynchronous index clean up happens every n seconds",
           "format": "int",
           "type": "number"
@@ -362,16 +367,34 @@
           "$ref": "#/definitions/StopwordConfig"
         },
         "indexTimestamps": {
+          "default": false,
           "description": "Index each object by its internal timestamps",
           "type": "boolean"
         },
         "indexNullState": {
+          "default": false,
           "description": "Index each object with the null state",
           "type": "boolean"
         },
         "indexPropertyLength": {
+          "default": false,
           "description": "Index length of properties",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ShardingConfig": {
+      "description": "Specify how the index should be sharded and distributed in the cluster",
+      "properties": {
+        "desiredCount": {
+          "description": "(Defaults to the number of nodes in the cluster.) Controls how many shards should be created for this collection index. The typical setting is that a collection should be distributed across all the nodes in the cluster, but you can explicitly set this value to a lower value. If the `desiredCount` is larger than the amount of physical nodes in the cluster, then some nodes will contain multiple shards.",
+          "type": "integer"
+        },
+        "virtualPerPhysical": {
+          "description": "Weaviate uses virtual shards. This helps in reducing the amount of data moved when resharding",
+          "default": 128,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -380,6 +403,7 @@
       "description": "Configure how replication is executed in a cluster",
       "properties": {
         "factor": {
+          "default": 1,
           "description": "Number of times a class is replicated",
           "type": "integer"
         }
@@ -390,12 +414,14 @@
       "description": "tuning parameters for the BM25 algorithm",
       "properties": {
         "k1": {
-          "description": "calibrates term-weight scaling based on the term frequency within a document",
+          "default": 1.2,
+          "description": "Calibrates term-weight scaling based on the term frequency within a document",
           "format": "float",
           "type": "number"
         },
         "b": {
-          "description": "calibrates term-weight scaling based on the document length",
+          "default": 0.75,
+          "description": "Calibrates term-weight scaling based on the document length",
           "format": "float",
           "type": "number"
         }
@@ -406,18 +432,22 @@
       "description": "fine-grained control over stopword list usage",
       "properties": {
         "preset": {
+          "default": "en",
+          "enum": ["en", "none"],
           "description": "pre-existing list of common words by language",
           "type": "string"
         },
         "additions": {
-          "description": "stopwords to be considered additionally",
+          "default": [],
+          "description": "Stopwords to be considered additionally. Can be any array of custom strings.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "removals": {
-          "description": "stopwords to be removed from consideration",
+          "default": [],
+          "description": "stopwords to be removed from consideration. Can be any array of custom strings.",
           "type": "array",
           "items": {
             "type": "string"
@@ -430,6 +460,7 @@
       "description": "Configuration related to multi-tenancy within a class",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether or not multi-tenancy is enabled for this class",
           "type": "boolean",
           "x-omitempty": false
@@ -454,11 +485,11 @@
           "type": "string"
         },
         "version": {
-          "description": "Version of weaviate you are currently running",
+          "description": "The Weaviate server version.",
           "type": "string"
         },
         "modules": {
-          "description": "Module-specific meta information",
+          "description": "Module-specific meta information.",
           "type": "object"
         }
       },
@@ -574,11 +605,11 @@
       "type": "array"
     },
     "VectorWeights": {
-      "description": "Allow custom overrides of vector weights as math expressions. E.g. \"pancake\": \"7\" will set the weight for the word pancake to 7 in the vectorization, whereas \"w * 3\" would triple the originally calculated word. This is an open object, with OpenAPI Specification 3.0 this will be more detailed. See Weaviate docs for more info. In the future this will become a key/value (string/string) object.",
+      "description": "Allow custom overrides of vector weights as math expressions in word-based vectorization models. E.g. \"pancake\": \"7\" will set the weight for the word pancake to 7 in the vectorization, whereas \"w * 3\" would triple the originally calculated word.",
       "type": "object"
     },
     "PropertySchema": {
-      "description": "This is an open object, with OpenAPI Specification 3.0 this will be more detailed. See Weaviate docs for more info. In the future this will become a key/value OR a SingleRef definition.",
+      "description": "Names and values of an individual property. A returned response may also contain additional metadata, such as from classification or feature projection.",
       "type": "object"
     },
     "SchemaHistory": {
@@ -638,28 +669,29 @@
       "type": "object"
     },
     "Class": {
+      "required": ["class"],
       "properties": {
         "class": {
-          "description": "Name of the class as URI relative to the schema URL.",
+          "description": "Name of the collection (a.k.a. class). Multiple words should be concatenated in CamelCase, e.g. `ArticleAuthor`.",
           "type": "string"
         },
         "vectorConfig": {
+          "description": "Configure named vectors (https://weaviate.io/developers/weaviate/config-refs/schema/multi-vector). Either use this field or `vectorizer`, `vectorIndexType`, and `vectorIndexConfig` fields. Available from `v1.24.0`.",
           "type": "object",
-          "additionalProperties": {
-            "$ref": "#/definitions/VectorConfig"
+          "properties": {
+            "<vector_name>": {
+              "$ref": "#/definitions/VectorConfig"
+            }
           }
         },
         "vectorIndexType": {
-          "description": "Name of the vector index to use, eg. (HNSW)",
-          "type": "string"
+          "$ref": "#/definitions/VectorIndexType"
         },
         "vectorIndexConfig": {
-          "description": "Vector-index config, that is specific to the type of index selected in vectorIndexType",
-          "type": "object"
+          "$ref": "#/definitions/VectorIndexConfig"
         },
         "shardingConfig": {
-          "description": "Manage how the index should be sharded and distributed in the cluster",
-          "type": "object"
+          "$ref": "#/definitions/ShardingConfig"
         },
         "replicationConfig": {
           "$ref": "#/definitions/ReplicationConfig"
@@ -671,19 +703,23 @@
           "$ref": "#/definitions/MultiTenancyConfig"
         },
         "vectorizer": {
-          "description": "Specify how the vectors for this class should be determined. The options are either 'none' - this means you have to import a vector with each object yourself - or the name of a module that provides vectorization capabilities, such as 'text2vec-contextionary'. If left empty, it will use the globally configured default which can itself either be 'none' or a specific module.",
-          "type": "string"
+          "$ref": "#/definitions/Vectorizer"
         },
         "moduleConfig": {
-          "description": "Configuration specific to modules this Weaviate instance has installed",
-          "type": "object"
+          "description": "Configuration specific to modules in a collection context.",
+          "type": "object",
+          "properties": {
+            "<module_name>": {
+              "$ref": "#/definitions/CollectionModuleConfig"
+            }
+          }
         },
         "description": {
-          "description": "Description of the class.",
+          "description": "Description of the collection for documentation purposes.",
           "type": "string"
         },
         "properties": {
-          "description": "The properties of the class.",
+          "description": "Define properties of the collection.",
           "items": {
             "$ref": "#/definitions/Property"
           },
@@ -693,119 +729,179 @@
       "type": "object"
     },
     "Property": {
+      "required": ["name", "dataType"],
       "properties": {
         "dataType": {
-          "description": "Can be a reference to another type when it starts with a capital (for example Person), otherwise \"string\" or \"int\".",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          "$ref": "#/definitions/DataType"
         },
         "description": {
-          "description": "Description of the property.",
-          "type": "string"
+          "$ref": "#/definitions/PropertyDescription"
         },
         "moduleConfig": {
-          "description": "Configuration specific to modules this Weaviate instance has installed",
-          "type": "object"
+          "description": "Configuration specific to modules in a property context.",
+          "type": "object",
+          "properties": {
+            "<module_name>": {
+              "$ref": "#/definitions/PropertyModuleConfig"
+            }
+          }
         },
         "name": {
-          "description": "Name of the property as URI relative to the schema URL.",
-          "type": "string"
+          "$ref": "#/definitions/PropertyName"
         },
         "indexInverted": {
-          "description": "Optional. Should this property be indexed in the inverted index. Defaults to true. If you choose false, you will not be able to use this property in where filters, bm25 or hybrid search. This property has no affect on vectorization decisions done by modules (deprecated as of v1.19; use indexFilterable or/and indexSearchable instead)",
+          "description": "(Deprecated) Whether to include this property in the inverted index. If `false`, this property cannot be used in `where` filters, `bm25` or `hybrid` search. <br/><br/>Unrelated to vectorization behavior (deprecated as of v1.19; use indexFilterable or/and indexSearchable instead)",
           "type": "boolean",
+          "default": true,
           "x-nullable": true
         },
         "indexFilterable": {
-          "description": "Optional. Should this property be indexed in the inverted index. Defaults to true. If you choose false, you will not be able to use this property in where filters. This property has no affect on vectorization decisions done by modules",
-          "type": "boolean",
-          "x-nullable": true
+          "$ref": "#/definitions/IndexFilterable"
         },
         "indexSearchable": {
-          "description": "Optional. Should this property be indexed in the inverted index. Defaults to true. Applicable only to properties of data type text and text[]. If you choose false, you will not be able to use this property in bm25 or hybrid search. This property has no affect on vectorization decisions done by modules",
-          "type": "boolean",
-          "x-nullable": true
+          "$ref": "#/definitions/IndexSearchable"
         },
         "tokenization": {
-          "description": "Determines tokenization of the property as separate words or whole field. Optional. Applies to text and text[] data types. Allowed values are `word` (default; splits on any non-alphanumerical, lowercases), `lowercase` (splits on white spaces, lowercases), `whitespace` (splits on white spaces), `field` (trims). Not supported for remaining data types",
-          "type": "string",
-          "enum": [
-            "word",
-            "lowercase",
-            "whitespace",
-            "field",
-            "trigram",
-            "gse"
-          ]
+          "$ref": "#/definitions/Tokenization"
         },
         "nestedProperties": {
-            "description": "The properties of the nested object(s). Applies to object and object[] data types.",
-            "items": {
-              "$ref": "#/definitions/NestedProperty"
-            },
-            "type": "array",
-            "x-omitempty": true
-          }
-      },
-      "type": "object"
-    },
-    "VectorConfig": {
-      "properties": {
-        "vectorizer": {
-          "description": "Configuration of a specific vectorizer used by this vector",
-          "type": "object"
-        },
-        "vectorIndexType": {
-          "description": "Name of the vector index to use, eg. (HNSW)",
-          "type": "string"
-        },
-        "vectorIndexConfig": {
-          "description": "Vector-index config, that is specific to the type of index selected in vectorIndexType",
-          "type": "object"
+          "description": "The properties of the nested object(s). Applies to object and object[] data types.",
+          "items": {
+            "$ref": "#/definitions/NestedProperty"
+          },
+          "type": "array",
+          "x-omitempty": true
         }
       },
       "type": "object"
     },
-    "NestedProperty": {
+    "CollectionModuleConfig": {
+      "description": "E.g. `text2vec-transformers`, `text2vec-openai`.",
       "properties": {
+        "vectorizeClassName": {
+          "description": "Whether the name of the collection is used in determining the object vector.",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PropertyModuleConfig": {
+      "description": "E.g. `text2vec-transformers`, `text2vec-openai`.",
+      "properties": {
+        "skip": {
+          "description": "If true, the whole property will NOT be included in vectorization.",
+          "default": false,
+          "type": "boolean"
+        },
+        "vectorizePropertyName": {
+          "description": "Whether the name of the property is used in determining the object vector.",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "VectorConfig": {
+      "description": "Configuration of each named vector.",
+      "properties": {
+        "vectorizer": {
+          "$ref": "#/definitions/Vectorizer"
+        },
+        "vectorIndexType": {
+          "$ref": "#/definitions/VectorIndexType"
+        },
+        "vectorIndexConfig": {
+          "$ref": "#/definitions/VectorIndexConfig"
+        }
+      },
+      "type": "object"
+    },
+    "Vectorizer": {
+      "description": "Vectorizer for this collection (e.g. `text2vec-transformers`). This will override any cluster-wide default set by an environment variable. <br/><br/>If `none`, you must import a vector with each object yourself.",
+      "type": "string",
+      "enum": ["none", "<vectorizer_module_name>"]
+    },
+    "VectorIndexType": {
+      "description": "Name of the vector index to use, eg. (HNSW)",
+      "default": "hnsw",
+      "type": "string",
+      "enum": ["hnsw", "flat"]
+    },
+    "VectorIndexConfig": {
+      "description": "Vector index type specific settings. See the [vector index configuration page](https://weaviate.io/developers/weaviate/config-refs/schema/vector-index) for more details",
+      "type": "object"
+    },
+    "Tokenization": {
+      "description": "Set tokenization of the property as separate words or whole field. Applies to text and text[] data types.",
+      "type": "string",
+      "default": "word",
+      "enum": [
+        "word",
+        "lowercase",
+        "whitespace",
+        "field",
+        "trigram",
+        "gse"
+      ]
+    },
+    "IndexFilterable": {
+      "description": "Whether to include this property in the filterable, Roaring Bitmap index. If `false`, this property cannot be used in `where` filters. <br/><br/>Unrelated to vectorization behavior.",
+      "default": true,
+      "type": "boolean",
+      "x-nullable": true
+    },
+    "IndexSearchable": {
+      "description": "Whether to include this property in the searchable, inverted index. If `false`, this property cannot be used in `bm25` or `hybrid` searches. <br/><br/>Unrelated to vectorization behavior.",
+      "default": true,
+      "type": "boolean",
+      "x-nullable": true
+    },
+    "PropertyName": {
+      "description": "The name of the property. Multiple words should be concatenated in camelCase, e.g. `nameOfAuthor`.",
+      "type": "string"
+    },
+    "DataType": {
+      "description": "Data type of the property. If it starts with a capital (for example Person), may be a reference to another type.",
+      "items": {
+        "type": "string",
+        "enum": ["string", "string[]", "object", "object[]", "int", "int[]", "number", "number[]", "date", "date[]", "uuid", "uuid[]", "geoCoordinates", "phoneNumber", "blob", "<cross_reference>"]
+      },
+      "type": "array"
+    },
+    "PropertyDescription": {
+      "description": "Description of the property for documentation purposes.",
+      "type": "string"
+    },
+    "NestedProperty": {
+      "required": ["name", "dataType"],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/PropertyName"
+        },
         "dataType": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          "$ref": "#/definitions/DataType"
         },
         "description": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
+          "$ref": "#/definitions/PropertyDescription"
         },
         "indexFilterable": {
-          "type": "boolean",
-          "x-nullable": true
+          "$ref": "#/definitions/IndexFilterable"
         },
         "indexSearchable": {
-          "type": "boolean",
-          "x-nullable": true
+          "$ref": "#/definitions/IndexSearchable"
         },
         "tokenization": {
-          "type": "string",
-          "enum": [
-            "word",
-            "lowercase",
-            "whitespace",
-            "field"
-          ]
+          "$ref": "#/definitions/Tokenization"
         },
         "nestedProperties": {
-            "items": {
-              "$ref": "#/definitions/NestedProperty"
-            },
-            "type": "array",
-            "x-omitempty": true
-          }
+          "description": "Specify the properties of the nested object(s) as required.",
+          "items": {
+            "$ref": "#/definitions/NestedProperty"
+          },
+          "type": "array",
+          "x-omitempty": true
+        }
       },
       "type": "object"
     },
@@ -911,7 +1007,7 @@
     },
     "BackupConfig": {
       "description": "Backup custom configuration",
-      "type": "object",      
+      "type": "object",
       "properties": {
         "CPUPercentage": {
           "description": "Desired CPU core utilization ranging from 1%-80%",
@@ -922,7 +1018,7 @@
           "x-nullable": false
         },
         "ChunkSize": {
-          "description": "Weaviate will attempt to come close the specified size, with a minimum of 2MB, default of 128MB, and a maximum of 512MB",
+          "description": "Aimed chunk size, with a minimum of 2MB, default of 128MB, and a maximum of 512MB. The actual chunk size may vary.",
           "type": "integer",
           "default": 128,
           "minimum": 2,
@@ -930,7 +1026,7 @@
           "x-nullable": false
         },
         "CompressionLevel": {
-          "description": "compression level used by compression algorithm",
+          "description": "Compression level used by compression algorithm",
           "type": "string",
           "default": "DefaultCompression",
           "x-nullable": false,
@@ -944,7 +1040,7 @@
     },
     "RestoreConfig": {
       "description": "Backup custom configuration",
-      "type": "object",      
+      "type": "object",
       "properties": {
         "CPUPercentage": {
           "description": "Desired CPU core utilization ranging from 1%-80%",
@@ -953,10 +1049,11 @@
           "minimum": 1,
           "maximum": 80,
           "x-nullable": false
-        }       
+        }
       }
     },
     "BackupCreateRequest": {
+      "required": ["id"],
       "description": "Request body for creating a backup of a set of classes",
       "properties": {
         "id": {
@@ -964,19 +1061,19 @@
           "type": "string"
         },
         "config": {
-          "description": "Custom configuration for the backup creation process",
+          "description": "Custom configuration for the backup creation process.",
           "type": "object",
           "$ref": "#/definitions/BackupConfig"
         },
         "include": {
-          "description": "List of classes to include in the backup creation process",
+          "description": "List of collections to include in the backup creation process. If not set, all collections are included. Cannot be used together with `exclude`.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "exclude": {
-          "description": "List of classes to exclude from the backup creation process",
+          "description": "List of collections to exclude from the backup creation process. If not set, all collections are included. Cannot be used together with `include`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1033,14 +1130,14 @@
           "$ref": "#/definitions/RestoreConfig"
         },
         "include": {
-          "description": "List of classes to include in the backup restoration process",
+          "description": "List of collections to include in the backup restoration process. If not set, all collections are included. Cannot be used together with `exclude`.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "exclude": {
-          "description": "List of classes to exclude from the backup restoration process",
+          "description": "List of collections to exclude from the backup restoration process. If not set, all collections are included. Cannot be used together with `include`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1099,7 +1196,7 @@
       "description": "The summary of Weaviate's statistics.",
       "properties": {
         "shardCount": {
-          "description": "The count of Weaviate's shards.",
+          "description": "The count of Weaviate's shards. To see this value, set `output` to `verbose`.",
           "format": "int",
           "type": "number",
           "x-omitempty": false
@@ -1187,7 +1284,8 @@
             "HEALTHY",
             "UNHEALTHY",
             "UNAVAILABLE",
-            "TIMEOUT"
+            "TIMEOUT",
+            "INDEXING"
           ]
         },
         "version": {
@@ -1390,7 +1488,7 @@
       }
     },
     "AdditionalProperties": {
-      "description": "Additional Meta information about a single object object.",
+      "description": "(Response only) Additional meta information about a single object.",
       "type": "object",
       "additionalProperties": {
         "type": "object"
@@ -1557,7 +1655,7 @@
     "Object": {
       "properties": {
         "class": {
-          "description": "Class of the Object, defined in the schema.",
+          "description": "The object collection name.",
           "type": "string"
         },
         "vectorWeights": {
@@ -1567,17 +1665,17 @@
           "$ref": "#/definitions/PropertySchema"
         },
         "id": {
-          "description": "ID of the Object.",
+          "description": "ID of the object.",
           "format": "uuid",
           "type": "string"
         },
         "creationTimeUnix": {
-          "description": "Timestamp of creation of this Object in milliseconds since epoch UTC.",
+          "description": "(Response only) Timestamp of creation of this object in milliseconds since epoch UTC.",
           "format": "int64",
           "type": "integer"
         },
         "lastUpdateTimeUnix": {
-          "description": "Timestamp of the last Object update in milliseconds since epoch UTC.",
+          "description": "(Response only) Timestamp of the last object update in milliseconds since epoch UTC.",
           "format": "int64",
           "type": "integer"
         },
@@ -1590,7 +1688,7 @@
           "$ref": "#/definitions/Vectors"
         },
         "tenant": {
-          "description": "Name of the Objects tenant.",
+          "description": "Name of the tenant.",
           "type": "string"
         },
         "additional": {
@@ -1659,12 +1757,16 @@
           }
         },
         "output": {
-          "description": "Controls the verbosity of the output, possible values are: \"minimal\", \"verbose\". Defaults to \"minimal\".",
+          "description": "Controls the verbosity of the output.",
           "type": "string",
-          "default": "minimal"
+          "default": "minimal",
+          "enum": [
+            "minimal",
+            "verbose"
+          ]
         },
         "dryRun": {
-          "description": "If true, objects will not be deleted yet, but merely listed. Defaults to false.",
+          "description": "If true, the call will show which objects would be matched using the specified filter without deleting any objects. <br/><br/>Depending on the configured verbosity, you will either receive a count of affected objects, or a list of IDs.",
           "type": "boolean",
           "default": false
         }
@@ -1691,9 +1793,13 @@
           }
         },
         "output": {
-          "description": "Controls the verbosity of the output, possible values are: \"minimal\", \"verbose\". Defaults to \"minimal\".",
+          "description": "Controls the verbosity of the output.",
           "type": "string",
-          "default": "minimal"
+          "default": "minimal",
+          "enum": [
+            "minimal",
+            "verbose"
+          ]
         },
         "dryRun": {
           "description": "If true, objects will not be deleted yet, but merely listed. Defaults to false.",
@@ -2082,6 +2188,7 @@
     },
     "Tenant": {
       "type": "object",
+      "required": ["name"],
       "description": "attributes representing a single tenant within weaviate",
       "properties": {
         "name": {
@@ -2089,7 +2196,7 @@
           "type": "string"
         },
         "activityStatus": {
-          "description": "activity status of the tenant's shard. Optional for creating tenant (implicit `HOT`) and required for updating tenant. Allowed values are `HOT` - tenant is fully active, `WARM` - tenant is active, some restrictions are imposed (TBD; not supported yet), `COLD` - tenant is inactive; no actions can be performed on tenant, tenant's files are stored locally, `FROZEN` - as COLD, but files are stored on cloud storage (not supported yet)",
+          "description": "Activity status of the tenant's shard. Optional for creating tenant (implicit `HOT`) and required for updating tenant. <br/><br/>Allowed values are `HOT` - tenant is fully active, `WARM` - tenant is active, some restrictions are imposed (TBD; not supported yet), `COLD` - tenant is inactive; no actions can be performed on tenant, tenant's files are stored locally, `FROZEN` - as COLD, but files are stored on cloud storage (not supported yet)",
           "type": "string",
           "enum": [
             "HOT",
@@ -2106,24 +2213,23 @@
   },
   "info": {
     "contact": {
-      "email": "hello@weaviate.io",
       "name": "Weaviate",
-      "url": "https://github.com/weaviate"
+      "url": "https://weaviate.io"
     },
-    "description": "Cloud-native, modular vector database",
+    "description": "# Introduction\n Weaviate is an open source, AI-native vector database that helps developers create intuitive and reliable AI-powered applications. \n ### Base Path \nThe base path for the Weaviate server is structured as `[YOUR-WEAVIATE-HOST]:[PORT]/v1`. As an example, if you wish to access the `schema` endpoint on a local instance, you would navigate to `http://localhost:8080/v1/schema`. Ensure you replace `[YOUR-WEAVIATE-HOST]` and `[PORT]` with your actual server host and port number respectively. \n ### Questions? \nIf you have any comments or questions, please feel free to reach out to us at the community forum [https://forum.weaviate.io/](https://forum.weaviate.io/). \n### Issues? \nIf you find a bug or want to file a feature request, please open an issue on our GitHub repository for [Weaviate](https://github.com/weaviate/weaviate). \n### Want more documentation? \nFor a quickstart, code examples, concepts and more, please visit our [documentation page](https://weaviate.io/developers/weaviate).",
     "title": "Weaviate",
     "version": "1.25.1"
   },
   "parameters": {
     "CommonAfterParameterQuery": {
-      "description": "The starting ID of the result window.",
+      "description": "A threshold UUID of the objects to retrieve after, using an UUID-based ordering. This object is not part of the set. <br/><br/>Must be used with `class`, typically in conjunction with `limit`. <br/><br/>Note `after` cannot be used with `offset` or `sort`. <br/><br/>For a null value similar to offset=0, set an empty string in the request, i.e. `after=` or `after`.",
       "in": "query",
       "name": "after",
       "required": false,
       "type": "string"
     },
     "CommonOffsetParameterQuery": {
-      "description": "The starting index of the result window. Default value is 0.",
+      "description": "The starting index of the result window. Note `offset` will retrieve `offset+limit` results and return `limit` results from the object with index `offset` onwards. Limited by the value of `QUERY_MAXIMUM_RESULTS`. <br/><br/>Should be used in conjunction with `limit`. <br/><br/>Cannot be used with `after`.",
       "format": "int64",
       "in": "query",
       "name": "offset",
@@ -2132,15 +2238,16 @@
       "default": 0
     },
     "CommonLimitParameterQuery": {
-      "description": "The maximum number of items to be returned per page. Default value is set in Weaviate config.",
+      "description": "The maximum number of items to be returned per page. The default is 25 unless set otherwise as an environment variable.",
       "format": "int64",
       "in": "query",
       "name": "limit",
       "required": false,
-      "type": "integer"
+      "type": "integer",
+      "default": 25
     },
     "CommonIncludeParameterQuery": {
-      "description": "Include additional information, such as classification infos. Allowed values include: classification, vector, interpretation",
+      "description": "Include additional information, such as classification infos. Allowed values include: `classification`, `vector`, `interpretation`, `featureProjection` and other module-specific additional properties.",
       "in": "query",
       "name": "include",
       "required": false,
@@ -2151,10 +2258,12 @@
       "in": "query",
       "name": "consistency_level",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "enum": ["ONE", "QUORUM", "ALL"],
+      "default": "QUORUM"
     },
     "CommonTenantParameterQuery": {
-      "description": "Specifies the tenant in a request targeting a multi-tenant class",
+      "description": "Specifies the tenant in a request targeting a multi-tenant collection",
       "in": "query",
       "name": "tenant",
       "required": false,
@@ -2168,39 +2277,42 @@
       "type": "string"
     },
     "CommonSortParameterQuery": {
-      "description": "Sort parameter to pass an information about the names of the sort fields",
+      "description": "Name(s) of the property to sort by - e.g. `city`, or `country,city`.",
       "in": "query",
       "name": "sort",
       "required": false,
       "type": "string"
     },
     "CommonOrderParameterQuery": {
-      "description": "Order parameter to tell how to order (asc or desc) data within given field",
+      "description": "Order parameter to tell how to order (asc or desc) data within given field. Should be used in conjunction with `sort` parameter. If providing multiple `sort` values, provide multiple `order` values in corresponding order, e.g.: `sort=author_name,title&order=desc,asc`.",
       "in": "query",
       "name": "order",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "enum": ["asc", "desc"]
     },
     "CommonClassParameterQuery": {
-      "description": "Class parameter specifies the class from which to query objects",
+      "description": "The collection from which to query objects.  <br/><br/>Note that if `class` is not provided, the response will not include any objects.",
       "in": "query",
       "name": "class",
       "required": false,
       "type": "string"
     },
     "CommonOutputVerbosityParameterQuery": {
-      "description": "Controls the verbosity of the output, possible values are: \"minimal\", \"verbose\". Defaults to \"minimal\".",
+      "description": "Controls the verbosity of the output.",
       "in": "query",
       "name": "output",
       "required": false,
       "type": "string",
+      "enum": ["minimal", "verbose"],
       "default": "minimal"
     }
   },
   "paths": {
     "/": {
       "get": {
-        "description": "Home. Discover the REST API",
+        "summary": "List available endpoints",
+        "description": "Get links to other endpoints to help discover the REST API",
         "operationId": "weaviate.root",
         "responses": {
           "200": {
@@ -2217,22 +2329,26 @@
               }
             }
           }
-        }
+        },
+        "tags": ["root"]
       }
     },
     "/.well-known/live": {
       "get": {
+        "summary": "Get application liveness.",
         "description": "Determines whether the application is alive. Can be used for kubernetes liveness probe",
         "operationId": "weaviate.wellknown.liveness",
         "responses": {
           "200": {
             "description": "The application is able to respond to HTTP requests"
           }
-        }
+        },
+        "tags": ["well-known"]
       }
     },
     "/.well-known/ready": {
       "get": {
+        "summary": "Get application readiness.",
         "description": "Determines whether the application is ready to receive traffic. Can be used for kubernetes readiness probe.",
         "operationId": "weaviate.wellknown.readiness",
         "responses": {
@@ -2242,7 +2358,8 @@
           "503": {
             "description": "The application is currently not able to serve traffic. If other horizontal replicas of weaviate are available and they are capable of receiving traffic, all traffic should be redirected there instead."
           }
-        }
+        },
+        "tags": ["well-known"]
       }
     },
     "/.well-known/openid-configuration": {
@@ -2283,11 +2400,9 @@
             }
           }
         },
-        "summary": "OIDC discovery information if OIDC auth is enabled",
+        "summary": "OIDC discovery information (if OIDC auth is enabled)",
         "tags": [
-          "well-known",
-          "oidc",
-          "discovery"
+          "well-known"
         ],
         "x-available-in-mqtt": false,
         "x-available-in-websocket": false
@@ -2295,7 +2410,7 @@
     },
     "/objects": {
       "get": {
-        "description": "Lists all Objects in reverse order of creation, owned by the user that belongs to the used token.",
+        "description": "Lists all objects in reverse order of creation. The data will be returned as an array of objects. <br/><br/>Tip: If you are looking to list all objects in a collection, use the `after` parameter.",
         "operationId": "objects.list",
         "x-serviceIds": [
           "weaviate.local.query"
@@ -2328,7 +2443,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response.",
+            "description": "Successful response. <br/><br/>If `class` is not provided, the response will not include any objects.",
             "schema": {
               "$ref": "#/definitions/ObjectsListResponse"
             }
@@ -2364,7 +2479,7 @@
             }
           }
         },
-        "summary": "Get a list of Objects.",
+        "summary": "Get a list of objects.",
         "tags": [
           "objects"
         ],
@@ -2372,7 +2487,7 @@
         "x-available-in-websocket": false
       },
       "post": {
-        "description": "Registers a new Object. Provided meta-data and schema values are validated.",
+        "description": "Create a new object. <br/><br/>Meta-data and schema values are validated. <br/><br/>**Note: Use `/batch` for importing many objects**: <br/>If you plan on importing a large number of objects, it's much more efficient to use the `/batch` endpoint. Otherwise, sending multiple single requests sequentially would incur a large performance penalty. <br/><br/>**Note: idempotence of `/objects`**: <br/>POST /objects will fail if an id is provided which already exists in the class. To update an existing object with the objects endpoint, use the PUT or PATCH method.",
         "operationId": "objects.create",
         "x-serviceIds": [
           "weaviate.local.add"
@@ -2425,7 +2540,7 @@
             }
           }
         },
-        "summary": "Create Objects between two Objects (object and subject).",
+        "summary": "Create a new object.",
         "tags": [
           "objects"
         ],
@@ -2435,7 +2550,7 @@
     },
     "/objects/{id}": {
       "delete": {
-        "description": "Deletes an Object from the system.",
+        "description": "Deletes an object from the database based on its UUID.",
         "operationId": "objects.delete",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2479,7 +2594,7 @@
             }
           }
         },
-        "summary": "Delete an Object based on its UUID.",
+        "summary": "Delete an object.",
         "tags": [
           "objects"
         ],
@@ -2488,7 +2603,7 @@
         "deprecated": true
       },
       "get": {
-        "description": "Lists Objects.",
+        "description": "Get a specific object based on its UUID. Also available as Websocket bus.",
         "operationId": "objects.get",
         "x-serviceIds": [
           "weaviate.local.query"
@@ -2538,7 +2653,7 @@
             }
           }
         },
-        "summary": "Get a specific Object based on its UUID and a Object UUID. Also available as Websocket bus.",
+        "summary": "List objects.",
         "tags": [
           "objects"
         ],
@@ -2547,7 +2662,7 @@
         "deprecated": true
       },
       "patch": {
-        "description": "Updates an Object. This method supports json-merge style patch semantics (RFC 7396). Provided meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
+        "description": "Update an object based on its UUID (using patch semantics). This method supports json-merge style patch semantics (RFC 7396). Provided meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
         "operationId": "objects.patch",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2606,7 +2721,7 @@
             }
           }
         },
-        "summary": "Update an Object based on its UUID (using patch semantics).",
+        "summary": "Update an object using patch semantics.",
         "tags": [
           "objects"
         ],
@@ -2615,7 +2730,7 @@
         "deprecated": true
       },
       "put": {
-        "description": "Updates an Object's data. Given meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
+        "description": "Updates an object based on its UUID. Given meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
         "operationId": "objects.update",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2673,7 +2788,7 @@
             }
           }
         },
-        "summary": "Update an Object based on its UUID.",
+        "summary": "Update an object.",
         "tags": [
           "objects"
         ],
@@ -2682,7 +2797,7 @@
         "deprecated": true
       },
       "head": {
-        "description": "Checks if an Object exists in the system.",
+        "description": "Checks if an object exists in the system based on its UUID.",
         "operationId": "objects.head",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2720,7 +2835,7 @@
             }
           }
         },
-        "summary": "Checks Object's existence based on its UUID.",
+        "summary": "Check if object exists.",
         "tags": [
           "objects"
         ],
@@ -2731,7 +2846,7 @@
     },
     "/objects/{className}/{id}": {
       "get": {
-        "description": "Get a single data object",
+        "description": "Get a data object based on its collection and UUID. Also available as Websocket bus.",
         "operationId": "objects.class.get",
         "x-serviceIds": [
           "weaviate.local.query"
@@ -2802,7 +2917,7 @@
             }
           }
         },
-        "summary": "Get a specific Object based on its class and UUID. Also available as Websocket bus.",
+        "summary": "Get an object.",
         "tags": [
           "objects"
         ],
@@ -2810,7 +2925,7 @@
         "x-available-in-websocket": false
       },
       "delete": {
-        "description": "Delete a single data object.",
+        "description": "Delete an object based on its collection and UUID. <br/><br/>Note: For backward compatibility, beacons also support an older, deprecated format without the collection name. As a result, when deleting a reference, the beacon specified has to match the beacon to be deleted exactly. In other words, if a beacon is present using the old format (without collection name) you also need to specify it the same way. <br/><br/>In the beacon format, you need to always use `localhost` as the host, rather than the actual hostname. `localhost` here refers to the fact that the beacon's target is on the same Weaviate instance, as opposed to a foreign instance.",
         "operationId": "objects.class.delete",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2872,7 +2987,7 @@
             }
           }
         },
-        "summary": "Delete object based on its class and UUID.",
+        "summary": "Delete an object.",
         "tags": [
           "objects"
         ],
@@ -2880,7 +2995,7 @@
         "x-available-in-websocket": true
       },
       "put": {
-        "description": "Update an individual data object based on its class and uuid.",
+        "description": "Update an object based on its uuid and collection. This (`put`) method replaces the object with the provided object.",
         "operationId": "objects.class.put",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -2944,7 +3059,7 @@
             }
           }
         },
-        "summary": "Update a class object based on its uuid",
+        "summary": "Update an object.",
         "tags": [
           "objects"
         ],
@@ -2952,7 +3067,7 @@
         "x-available-in-websocket": false
       },
       "patch": {
-        "description": "Update an individual data object based on its class and uuid. This method supports json-merge style patch semantics (RFC 7396). Provided meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
+        "description": "Update an individual data object based on its collection and uuid. This method supports json-merge style patch semantics (RFC 7396). Provided meta-data and schema values are validated. LastUpdateTime is set to the time this function is called.",
         "operationId": "objects.class.patch",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3021,7 +3136,7 @@
             }
           }
         },
-        "summary": "Update an Object based on its UUID (using patch semantics).",
+        "summary": "Update an object using patch semantics.",
         "tags": [
           "objects"
         ],
@@ -3029,7 +3144,7 @@
         "x-available-in-websocket": false
       },
       "head": {
-        "description": "Checks if a data object exists without retrieving it.",
+        "description": "Checks if a data object exists based on its collection and uuid without retrieving it. <br/><br/>Internally it skips reading the object from disk other than checking if it is present. Thus it does not use resources on marshalling, parsing, etc., and is faster. Note the resulting HTTP request has no body; the existence of an object is indicated solely by the status code.",
         "operationId": "objects.class.head",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3086,7 +3201,7 @@
             }
           }
         },
-        "summary": "Checks object's existence based on its class and uuid.",
+        "summary": "Check if an object exists.",
         "tags": [
           "objects"
         ],
@@ -3096,7 +3211,7 @@
     },
     "/objects/{id}/references/{propertyName}": {
       "post": {
-        "description": "Add a single reference to a class-property.",
+        "description": "Add a cross-reference.",
         "operationId": "objects.references.create",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3155,7 +3270,7 @@
             }
           }
         },
-        "summary": "Add a single reference to a class-property.",
+        "summary": "Add a cross-reference.",
         "tags": [
           "objects"
         ],
@@ -3164,7 +3279,7 @@
         "deprecated": true
       },
       "put": {
-        "description": "Replace all references to a class-property.",
+        "description": "Replace all references in cross-reference property of an object.",
         "operationId": "objects.references.update",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3223,7 +3338,7 @@
             }
           }
         },
-        "summary": "Replace all references to a class-property.",
+        "summary": "Replace cross-references.",
         "tags": [
           "objects"
         ],
@@ -3291,7 +3406,7 @@
             }
           }
         },
-        "summary": "Delete the single reference that is given in the body from the list of references that this property has.",
+        "summary": "Delete a cross-reference.",
         "tags": [
           "objects"
         ],
@@ -3302,7 +3417,7 @@
     },
     "/objects/{className}/{id}/references/{propertyName}": {
       "post": {
-        "description": "Add a single reference to a class-property.",
+        "description": "Add a single reference to an object. This adds a reference to the array of cross-references of the given property in the source object specified by its collection name and id",
         "operationId": "objects.class.references.create",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3380,7 +3495,7 @@
             }
           }
         },
-        "summary": "Add a single reference to a class-property.",
+        "summary": "Add a cross-reference.",
         "tags": [
           "objects"
         ],
@@ -3388,7 +3503,7 @@
         "x-available-in-websocket": false
       },
       "put": {
-        "description": "Update all references of a property of a data object.",
+        "description": "Replace **all** references in cross-reference property of an object.",
         "operationId": "objects.class.references.put",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3466,7 +3581,7 @@
             }
           }
         },
-        "summary": "Replace all references to a class-property.",
+        "summary": "Replace cross-references.",
         "tags": [
           "objects"
         ],
@@ -3474,7 +3589,7 @@
         "x-available-in-websocket": false
       },
       "delete": {
-        "description": "Delete the single reference that is given in the body from the list of references that this property of a data object has",
+        "description": "Delete the single reference that is given in the body from the list of references that this property has.",
         "operationId": "objects.class.references.delete",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3555,7 +3670,7 @@
             }
           }
         },
-        "summary": "Delete the single reference that is given in the body from the list of references that this property has.",
+        "summary": "Delete a cross-reference.",
         "tags": [
           "objects"
         ],
@@ -3565,7 +3680,7 @@
     },
     "/objects/validate": {
       "post": {
-        "description": "Validate an Object's schema and meta-data. It has to be based on a schema, which is related to the given Object to be accepted by this validation.",
+        "description": "Validate an object's schema and meta-data without creating it. <br/><br/>If the schema of the object is valid, the request should return nothing with a plain RESTful request. Otherwise, an error object will be returned.",
         "operationId": "objects.validate",
         "x-serviceIds": [
           "weaviate.local.query.meta"
@@ -3606,7 +3721,7 @@
             }
           }
         },
-        "summary": "Validate an Object based on a schema.",
+        "summary": "Validate an object.",
         "tags": [
           "objects"
         ],
@@ -3616,7 +3731,7 @@
     },
     "/batch/objects": {
       "post": {
-        "description": "Register new Objects in bulk. Provided meta-data and schema values are validated.",
+        "description": "Create new objects in bulk. <br/><br/>Meta-data and schema values are validated. <br/><br/>**Note: idempotence of `/batch/objects`**: <br/>`POST /batch/objects` is idempotent, and will overwrite any existing object given the same id.",
         "operationId": "batch.objects.create",
         "x-serviceIds": [
           "weaviate.local.add"
@@ -3695,16 +3810,15 @@
             }
           }
         },
-        "summary": "Creates new Objects based on a Object template as a batch.",
+        "summary": "Batch create new objects.",
         "tags": [
-          "batch",
-          "objects"
+          "batch"
         ],
         "x-available-in-mqtt": false,
         "x-available-in-websocket": false
       },
       "delete": {
-        "description": "Delete Objects in bulk that match a certain filter.",
+        "description": "Batch delete objects that match a particular filter. <br/><br/>The request body takes a single `where` filter and will delete all objects matched. <br/><br/>Note that there is a limit to the number of objects to be deleted at once using this filter, in order to protect against unexpected memory surges and very-long-running requests. The default limit is 10,000 and may be configured by setting the `QUERY_MAXIMUM_RESULTS` environment variable. <br/><br/>Objects are deleted in the same order that they would be returned in an equivalent Get query. To delete more objects than the limit, run the same query multiple times.",
         "operationId": "batch.objects.delete",
         "x-serviceIds": [
           "weaviate.local.manipulate"
@@ -3760,10 +3874,9 @@
             }
           }
         },
-        "summary": "Deletes Objects based on a match filter as a batch.",
+        "summary": "Batch delete objects.",
         "tags": [
-          "batch",
-          "objects"
+          "batch"
         ],
         "x-available-in-mqtt": false,
         "x-available-in-websocket": false
@@ -3771,7 +3884,7 @@
     },
     "/batch/references": {
       "post": {
-        "description": "Register cross-references between any class items (objects or objects) in bulk.",
+        "description": "Batch create cross-references between collections items (objects or objects) in bulk.",
         "operationId": "batch.references.create",
         "x-serviceIds": [
           "weaviate.local.add"
@@ -3831,10 +3944,9 @@
             }
           }
         },
-        "summary": "Creates new Cross-References between arbitrary classes in bulk.",
+        "summary": "Batch create cross-references.",
         "tags": [
-          "batch",
-          "references"
+          "batch"
         ],
         "x-available-in-mqtt": false,
         "x-available-in-websocket": false
@@ -3842,7 +3954,7 @@
     },
     "/graphql": {
       "post": {
-        "description": "Get an object based on GraphQL",
+        "description": "Get a response based on a GraphQL query",
         "operationId": "graphql.post",
         "x-serviceIds": [
           "weaviate.local.query",
@@ -3890,7 +4002,7 @@
             }
           }
         },
-        "summary": "Get a response based on GraphQL",
+        "summary": "Perform a GraphQL query.",
         "tags": [
           "graphql"
         ],
@@ -3900,7 +4012,7 @@
     },
     "/graphql/batch": {
       "post": {
-        "description": "Perform a batched GraphQL query",
+        "description": "Perform batched GraphQL query",
         "operationId": "graphql.batch",
         "x-serviceIds": [
           "weaviate.local.query",
@@ -3948,7 +4060,7 @@
             }
           }
         },
-        "summary": "Get a response based on GraphQL.",
+        "summary": "Perform batched GraphQL queries.",
         "tags": [
           "graphql"
         ],
@@ -3958,7 +4070,7 @@
     },
     "/meta": {
       "get": {
-        "description": "Gives meta information about the server and can be used to provide information to another Weaviate instance that wants to interact with the current instance.",
+        "description": "Returns meta information about the server. Can be used to provide information to another Weaviate instance that wants to interact with the current instance.",
         "operationId": "meta.get",
         "x-serviceIds": [
           "weaviate.local.query.meta"
@@ -3986,7 +4098,7 @@
             }
           }
         },
-        "summary": "Returns meta information of the current Weaviate instance.",
+        "summary": "Get instance metadata.",
         "tags": [
           "meta"
         ],
@@ -3996,7 +4108,8 @@
     },
     "/schema": {
       "get": {
-        "summary": "Dump the current the database schema.",
+        "summary": "Get the entire schema.",
+        "description": "Fetch an array of all collection definitions from the schema.",
         "operationId": "schema.dump",
         "x-serviceIds": [
           "weaviate.local.query.meta"
@@ -4039,7 +4152,8 @@
         }
       },
       "post": {
-        "summary": "Create a new Object class in the schema.",
+        "summary": "Create a collection.",
+        "description": "Create a new data object collection. <br/><br/>If [AutoSchema](https://weaviate.io/developers/weaviate/config-refs/schema#auto-schema) is enabled, Weaviate will attempt to infer the schema from the data at import time. However, manual schema definition is recommended for production environments. <br/><br/>For further discussions of parameters, please see the [schema reference page](https://weaviate.io/developers/weaviate/config-refs/schema).",
         "operationId": "schema.objects.create",
         "x-serviceIds": [
           "weaviate.local.add.meta"
@@ -4090,7 +4204,7 @@
     },
     "/schema/{className}": {
       "get": {
-        "summary": "Get a single class from the schema",
+        "summary": "Get a single collection schema.",
         "operationId": "schema.objects.get",
         "x-serviceIds": [
           "weaviate.local.get.meta"
@@ -4142,7 +4256,8 @@
         }
       },
       "delete": {
-        "summary": "Remove an Object class (and all data in the instances) from the schema.",
+        "summary": "Remove a collection (and its data).",
+        "description": "Remove a collection from the schema. This will also delete all the objects in the collection.",
         "operationId": "schema.objects.delete",
         "x-serviceIds": [
           "weaviate.local.manipulate.meta"
@@ -4186,8 +4301,8 @@
         }
       },
       "put": {
-        "summary": "Update settings of an existing schema class",
-        "description": "Use this endpoint to alter an existing class in the schema. Note that not all settings are mutable. If an error about immutable fields is returned and you still need to update this particular setting, you will have to delete the class (and the underlying data) and recreate. This endpoint cannot be used to modify properties. Instead use POST /v1/schema/{className}/properties. A typical use case for this endpoint is to update configuration, such as the vectorIndexConfig. Note that even in mutable sections, such as vectorIndexConfig, some fields may be immutable.",
+        "summary": "Update an existing collection.",
+        "description": "Alter an existing collection definition. <br/><br/>Note that not all settings are mutable ([see this list](https://weaviate.io/developers/weaviate/config-refs/schema#mutability)). To update any other (i.e. immutable) setting, you need to delete the collection, re-create it with the correct setting and then re-import the data. <br/><br/>This endpoint cannot be used to modify properties. Instead use POST /v1/schema/{className}/properties. A typical use case for this endpoint is to update a index configuration, such as `vectorIndexConfig/dynamicEfFactor`. <br/><br/>You should attach a body to this PUT request with the entire new configuration of the collection.",
         "operationId": "schema.objects.update",
         "x-serviceIds": [
           "weaviate.local.manipulate.meta"
@@ -4250,7 +4365,8 @@
     },
     "/schema/{className}/properties": {
       "post": {
-        "summary": "Add a property to an Object class.",
+        "summary": "Add a property.",
+        "description": "Add a property to an existing collection. <br/><br/>If possible, we encourage you to create all required properties at collection creation time. Adding a property after collection creation can lead to [some indexing limitations](https://weaviate.io/developers/weaviate/config-refs/schema).",
         "operationId": "schema.objects.properties.add",
         "x-serviceIds": [
           "weaviate.local.manipulate.meta"
@@ -4307,7 +4423,8 @@
     },
     "/schema/{className}/shards": {
       "get": {
-        "summary": "Get the shards status of an Object class",
+        "summary": "Get the shard status",
+        "description": "Get the status of every shard in the cluster.",
         "operationId": "schema.objects.shards.get",
         "x-serviceIds": [
           "weaviate.local.get.meta"
@@ -4361,7 +4478,8 @@
     },
     "/schema/{className}/shards/{shardName}": {
       "put": {
-        "description": "Update shard status of an Object Class",
+        "summary": "Update a shard status.",
+        "description": "Update a shard status for a collection. For example, a shard may have been marked as `READONLY` because its disk was full. After providing more disk space, use this endpoint to set the shard status to `READY` again. There is also a convenience function in each client to set the status of all shards of a collection.",
         "operationId": "schema.objects.shards.update",
         "x-serviceIds": [
           "weaviate.local.manipulate.meta"
@@ -4430,7 +4548,8 @@
     },
     "/schema/{className}/tenants": {
       "post": {
-        "description": "Create a new tenant for a specific class",
+        "summary": "Create a new tenant",
+        "description": "Create a new tenant for a collection. Multi-tenancy must be enabled in the collection definition.",
         "operationId": "tenants.create",
         "tags": [
           "schema"
@@ -4488,7 +4607,8 @@
         }
       },
       "put": {
-        "description": "Update tenant of a specific class",
+        "summary": "Update a tenant.",
+        "description": "Update a tenant for a collection",
         "operationId": "tenants.update",
         "tags": [
           "schema"
@@ -4546,7 +4666,8 @@
         }
       },
       "delete": {
-        "description": "delete tenants from a specific class",
+        "summary": "Delete tenant(s).",
+        "description": "Delete tenants from a collection",
         "operationId": "tenants.delete",
         "tags": [
           "schema"
@@ -4598,7 +4719,8 @@
         }
       },
       "get": {
-        "description": "get all tenants from a specific class",
+        "summary": "Get the list of tenants.",
+        "description": "Get all tenants from a collection.",
         "operationId": "tenants.get",
         "tags": [
           "schema"
@@ -4712,10 +4834,11 @@
           }
         }
       }
-    },    
+    },
     "/backups/{backend}": {
       "post": {
-        "description": "Starts a process of creating a backup for a set of classes",
+        "summary": "Start a backup process",
+        "description": "Start creating a backup for a set of collections. <br/><br/>Notes: <br/>- Weaviate uses gzip compression by default. <br/>- Weaviate stays usable while a backup process is ongoing.",
         "operationId": "backups.create",
         "x-serviceIds": [
           "weaviate.local.backup"
@@ -4729,7 +4852,7 @@
             "in": "path",
             "required": true,
             "type": "string",
-            "description": "Backup backend name e.g. filesystem, gcs, s3."
+            "description": "Backup backend name e.g. `filesystem`, `gcs`, `s3`, `azure`."
           },
           {
             "in": "body",
@@ -4773,7 +4896,8 @@
     },
     "/backups/{backend}/{id}": {
       "get": {
-        "description": "Returns status of backup creation attempt for a set of classes",
+        "summary": "Get backup process status",
+        "description": "Returns status of backup creation attempt for a set of collections. <br/><br/>All client implementations have a `wait for completion` option which will poll the backup status in the background and only return once the backup has completed (successfully or unsuccessfully). If you set the `wait for completion` option to false, you can also check the status yourself using this endpoint.",
         "operationId": "backups.create.status",
         "x-serviceIds": [
           "weaviate.local.backup"
@@ -4836,7 +4960,8 @@
     },
     "/backups/{backend}/{id}/restore": {
       "post": {
-        "description": "Starts a process of restoring a backup for a set of classes",
+        "summary": "Start a restoration process",
+        "description": "Starts a process of restoring a backup for a set of collections. <br/><br/>Any backup can be restored to any machine, as long as the number of nodes between source and target are identical.<br/><br/>Requrements:<br/><br/>- None of the collections to be restored already exist on the target restoration node(s).<br/>- The node names of the backed-up collections' must match those of the target restoration node(s).",
         "operationId": "backups.restore",
         "x-serviceIds": [
           "weaviate.local.backup"
@@ -4850,7 +4975,7 @@
             "in": "path",
             "required": true,
             "type": "string",
-            "description": "Backup backend name e.g. filesystem, gcs, s3."
+            "description": "Backup backend name e.g. `filesystem`, `gcs`, `s3`, `azure`."
           },
           {
             "name": "id",
@@ -4905,7 +5030,8 @@
         }
       },
       "get": {
-        "description": "Returns status of a backup restoration attempt for a set of classes",
+        "summary": "Get restore process status",
+        "description": "Returns status of a backup restoration attempt for a set of classes. <br/><br/>All client implementations have a `wait for completion` option which will poll the backup status in the background and only return once the backup has completed (successfully or unsuccessfully). If you set the `wait for completion` option to false, you can also check the status yourself using the this endpoint.",
         "operationId": "backups.restore.status",
         "x-serviceIds": [
           "weaviate.local.backup"
@@ -4919,7 +5045,7 @@
             "in": "path",
             "required": true,
             "type": "string",
-            "description": "Backup backend name e.g. filesystem, gcs, s3."
+            "description": "Backup backend name e.g. `filesystem`, `gcs`, `s3`, `azure`."
           },
           {
             "name": "id",
@@ -5003,7 +5129,8 @@
     },
     "/nodes": {
       "get": {
-        "description": "Returns status of Weaviate DB.",
+        "summary": "Node information for the database.",
+        "description": "Returns node information for the entire database.",
         "operationId": "nodes.get",
         "x-serviceIds": [
           "weaviate.nodes.status.get"
@@ -5055,7 +5182,8 @@
     },
     "/nodes/{className}": {
       "get": {
-        "description": "Returns status of Weaviate DB.",
+        "summary": "Node information for a collection.",
+        "description": "Returns node information for the nodes relevant to the collection.",
         "operationId": "nodes.get.class",
         "x-serviceIds": [
           "weaviate.nodes.status.get.class"
@@ -5236,28 +5364,44 @@
   "swagger": "2.0",
   "tags": [
     {
-      "name": "objects"
-    },
-    {
-      "name": "batch",
-      "description": "These operations allow to execute batch requests for Objects and Objects. Mostly used for importing large datasets."
-    },
-    {
-      "name": "graphql"
-    },
-    {
-      "name": "meta"
-    },
-    {
-      "name": "P2P"
-    },
-    {
-      "name": "contextionary-API",
-      "description": "All functions related to the Contextionary."
+      "name": "root",
+      "description": "The root of the API. Note the base url is `/v1`."
     },
     {
       "name": "schema",
-      "description": "These operations enable manipulation of the schema in Weaviate schema."
+      "description": "Operate on the database schema. <br/><br/>Note an 'Object class' in Weaviate is being renamed to a 'collection'. <br/><br/>See <a href='https://weaviate.io/developers/weaviate/manage-data/collections'>this page</a> for client code examples."
+    },
+    {
+      "name": "objects",
+      "description": "Create, update and delete objects and cross-references."
+    },
+    {
+      "name": "batch",
+      "description": "Create, update and delete multiple objects and references at once. <br/><br/>Note that object-level errors may be reported even in a successful batch request. Accordingly, we recommend you check the response body for errors."
+    },
+    {
+      "name": "backups",
+      "description": "Create, restore and check the status of backups. <br/><br/>See the [backups page](https://weaviate.io/developers/weaviate/configuration/backups) for a general introduction, configuration, and tech background of backups."
+    },
+    {
+      "name": "meta",
+      "description": "Retrieve information about the server such as the hostname, location, versions and modules."
+    },
+    {
+      "name": "nodes",
+      "description": "Retrieve information about relevant nodes in the cluster. The query can be for the entire cluster, or for a particular collection."
+    },
+    {
+      "name": "well-known",
+      "description": "`.well-known` endpoints. If OpenID Connect (OIDC) authentication is enabled, this endpoint includes OIDC configuration details."
+    },
+    {
+      "name": "graphql",
+      "description": "Query data using the GraphQL query language. See the [Weaviate GraphQL documentation](https://weaviate.io/developers/weaviate/api/graphql) for query syntax details."
+    },
+    {
+      "name": "classifications",
+      "description": "Perform classification operations"
     }
   ]
 }
