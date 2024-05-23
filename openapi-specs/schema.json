@@ -4777,6 +4777,7 @@
     },
     "/schema/{className}/tenants/{tenantName}": {
       "head": {
+        "summary": "Check whether a tenant exists",
         "description": "Check if a tenant exists for a specific class",
         "operationId": "tenant.exists",
         "tags": [
@@ -5088,6 +5089,7 @@
     },
     "/cluster/statistics": {
       "get": {
+        "summary": "See Raft cluster statistics",
         "description": "Returns Raft cluster statistics of Weaviate DB.",
         "operationId": "cluster.get.statistics",
         "x-serviceIds": [
@@ -5386,6 +5388,10 @@
     {
       "name": "meta",
       "description": "Retrieve information about the server such as the hostname, location, versions and modules."
+    },
+    {
+      "name": "cluster",
+      "description": "Retrieve information about the cluster."
     },
     {
       "name": "nodes",
