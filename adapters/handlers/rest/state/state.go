@@ -39,6 +39,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/schema"
 	"github.com/weaviate/weaviate/usecases/sharding"
 	"github.com/weaviate/weaviate/usecases/traverser"
+	"gitlab.com/donomii/racketprogs/stalk"
 )
 
 // State is the only source of application-wide state
@@ -74,6 +75,7 @@ type State struct {
 
 	ClusterService *rCluster.Service
 	TenantActivity *tenantactivity.Handler
+	Stalk 		*stalk.StalkObject
 }
 
 // GetGraphQL is the safe way to retrieve GraphQL from the state as it can be

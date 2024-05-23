@@ -64,6 +64,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/weaviate/sroar v0.0.0-20230210105426-26108af5465d
 	github.com/weaviate/tiktoken-go v0.0.2
+	gitlab.com/donomii/racketprogs/stalk v0.0.0-20240523125251-04e9e7a2d727
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1
 	golang.org/x/text v0.14.0
 	google.golang.org/protobuf v1.33.0
@@ -172,6 +173,8 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/willf/bitset v1.1.11 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
+	gitlab.com/donomii/racketprogs v0.0.0-20240523101755-6267bdc4e97c // indirect
+	gitlab.com/donomii/weaviate-client v0.0.0-20240319123042-01f90f797cd3 // indirect
 	go.mongodb.org/mongo-driver v1.14.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
@@ -190,4 +193,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-go 1.21
+go 1.21.6

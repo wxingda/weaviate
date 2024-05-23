@@ -104,6 +104,7 @@ import (
 	"github.com/weaviate/weaviate/usecases/sharding"
 	"github.com/weaviate/weaviate/usecases/telemetry"
 	"github.com/weaviate/weaviate/usecases/traverser"
+	"gitlab.com/donomii/racketprogs/stalk"
 )
 
 const MinimumRequiredContextionaryVersion = "1.0.2"
@@ -546,6 +547,25 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 
 	startGrpcServer(grpcServer, appState)
 
+	go func() {
+
+		//Start stalk debug server on http port 666
+		//Create a new http server using the builtin modules
+		//and start it on port 666
+		homeHandler := func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query().Get("q")
+			s := appState.Stalk
+			 stalk.EvalCode(s, query, "httprequest")
+			res := s.AsString(4)
+
+			fmt.Fprintf(w, "Query parameter q: %s, result:\n%v", query, string(res))
+		}
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", homeHandler)
+		fmt.Println("Server is listening on port 666...")
+		http.ListenAndServe(":666", mux)
+	}()
+
 	return setupGlobalMiddleware(api.Serve(setupMiddlewares))
 }
 
@@ -628,6 +648,7 @@ func startupRoutine(ctx context.Context, options *swag.CommandLineOptionsGroup) 
 	appState.Logger.
 		WithField("action", "startup").
 		Debug("startup routine complete")
+	appState.Stalk = stalk.NewStalk()
 
 	return appState
 }
