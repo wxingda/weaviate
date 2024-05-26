@@ -27,6 +27,7 @@ import (
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
 	"github.com/weaviate/weaviate/entities/vectorindex/hnsw"
+	"github.com/weaviate/weaviate/entities/versioned"
 	"github.com/weaviate/weaviate/usecases/config"
 	"github.com/weaviate/weaviate/usecases/sharding"
 	shardingConfig "github.com/weaviate/weaviate/usecases/sharding/config"
@@ -1029,7 +1030,7 @@ func Test_Validation_PropertyNames(t *testing.T) {
 func Test_UpdateClass(t *testing.T) {
 	t.Run("ClassNotFound", func(t *testing.T) {
 		handler, fakeMetaHandler := newTestHandler(t, &fakeDB{})
-		fakeMetaHandler.On("ReadOnlyClass", "WrongClass", mock.Anything).Return(nil)
+		fakeMetaHandler.On("QueryReadOnlyClasses", []string{"WrongClass"}).Return(map[string]versioned.Class{}, nil)
 		fakeMetaHandler.On("UpdateClass", mock.Anything, mock.Anything).Return(ErrNotFound)
 
 		err := handler.UpdateClass(context.Background(), nil, "WrongClass", &models.Class{})
@@ -1338,9 +1339,9 @@ func Test_UpdateClass(t *testing.T) {
 
 				fakeMetaHandler.On("AddClass", test.initial, mock.Anything).Return(nil)
 				fakeMetaHandler.On("UpdateClass", mock.Anything, mock.Anything).Return(nil)
-				fakeMetaHandler.On("ReadOnlyClass", test.initial.Class, mock.Anything).Return(test.initial)
+				fakeMetaHandler.On("QueryReadOnlyClasses", []string{test.initial.Class}).Return(map[string]versioned.Class{test.initial.Class: {Class: test.initial}}, nil)
 				if len(test.initial.Properties) > 0 {
-					fakeMetaHandler.On("ReadOnlyClass", test.initial.Class, mock.Anything).Return(test.initial)
+					fakeMetaHandler.On("QueryReadOnlyClasses", []string{test.initial.Class}).Return(map[string]versioned.Class{test.initial.Class: {Class: test.initial}}, nil)
 				}
 				_, _, err := handler.AddClass(ctx, nil, test.initial)
 				assert.Nil(t, err)

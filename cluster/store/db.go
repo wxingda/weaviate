@@ -109,7 +109,8 @@ func (db *localDB) UpdateClass(cmd *command.ApplyRequest, nodeID string, schemaO
 		meta.Class.VectorIndexConfig = u.VectorIndexConfig
 		meta.Class.InvertedIndexConfig = u.InvertedIndexConfig
 		meta.Class.VectorConfig = u.VectorConfig
-		if meta.Class.ReplicationConfig.Factor < u.ReplicationConfig.Factor {
+		if meta.Class.ReplicationConfig != nil &&
+			u.ReplicationConfig != nil && meta.Class.ReplicationConfig.Factor < u.ReplicationConfig.Factor {
 			meta.Class.ReplicationConfig = u.ReplicationConfig
 		}
 		meta.Class.MultiTenancyConfig = u.MultiTenancyConfig
