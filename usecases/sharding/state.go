@@ -148,7 +148,13 @@ func InitState(id string, config config.Config, nodes nodes, replFactor int64, p
 		return nil, err
 	}
 	out.initVirtual()
+	for n, p := range out.Physical {
+		fmt.Println("NATEE InitState pre", n, p.BelongsToNodes)
+	}
 	out.distributeVirtualAmongPhysical()
+	for n, p := range out.Physical {
+		fmt.Println("NATEE InitState post", n, p.BelongsToNodes)
+	}
 
 	return out, nil
 }
@@ -285,6 +291,7 @@ func (s *State) initPhysical(nodes []string, replFactor int64) error {
 		}
 
 		s.Physical[name] = shard
+		fmt.Println("NATEE initPhysical BelongsToNodes", name, s.Physical[name].BelongsToNodes)
 	}
 
 	return nil

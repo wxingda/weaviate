@@ -3059,6 +3059,39 @@ func init() {
           }
         }
       }
+    },
+    "/shardmovements": {
+      "post": {
+        "description": "Creates a shard movement operation",
+        "tags": [
+          "shardmovements"
+        ],
+        "summary": "Create shard movement",
+        "operationId": "shardmovements.create",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ShardMovement created.",
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        },
+        "x-available-in-mqtt": false,
+        "x-available-in-websocket": false,
+        "x-serviceIds": [
+          "weaviate.local.shardmovement"
+        ]
+      }
     }
   },
   "definitions": {
@@ -4784,6 +4817,23 @@ func init() {
     "SchemaHistory": {
       "description": "This is an open object, with OpenAPI Specification 3.0 this will be more detailed. See Weaviate docs for more info. In the future this will become a key/value OR a SingleRef definition.",
       "type": "object"
+    },
+    "ShardMovement": {
+      "type": "object",
+      "properties": {
+        "fromNode": {
+          "description": "node ID to move replica from",
+          "type": "string"
+        },
+        "shardName": {
+          "description": "name of the shard...id?",
+          "type": "string"
+        },
+        "toNode": {
+          "description": "node ID to move replica to",
+          "type": "string"
+        }
+      }
     },
     "ShardStatus": {
       "description": "The status of a single shard",
@@ -8432,6 +8482,39 @@ func init() {
           }
         }
       }
+    },
+    "/shardmovements": {
+      "post": {
+        "description": "Creates a shard movement operation",
+        "tags": [
+          "shardmovements"
+        ],
+        "summary": "Create shard movement",
+        "operationId": "shardmovements.create",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ShardMovement created.",
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        },
+        "x-available-in-mqtt": false,
+        "x-available-in-websocket": false,
+        "x-serviceIds": [
+          "weaviate.local.shardmovement"
+        ]
+      }
     }
   },
   "definitions": {
@@ -10334,6 +10417,23 @@ func init() {
     "SchemaHistory": {
       "description": "This is an open object, with OpenAPI Specification 3.0 this will be more detailed. See Weaviate docs for more info. In the future this will become a key/value OR a SingleRef definition.",
       "type": "object"
+    },
+    "ShardMovement": {
+      "type": "object",
+      "properties": {
+        "fromNode": {
+          "description": "node ID to move replica from",
+          "type": "string"
+        },
+        "shardName": {
+          "description": "name of the shard...id?",
+          "type": "string"
+        },
+        "toNode": {
+          "description": "node ID to move replica to",
+          "type": "string"
+        }
+      }
     },
     "ShardStatus": {
       "description": "The status of a single shard",

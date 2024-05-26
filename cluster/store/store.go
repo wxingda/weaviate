@@ -155,7 +155,7 @@ type Store struct {
 
 	nodeID        string
 	host          string
-	db            *localDB
+	DB            *localDB
 	log           *logrus.Logger
 	logLevel      string
 	logJsonFormat bool
@@ -204,7 +204,7 @@ func New(cfg Config) Store {
 		nodeID:                 cfg.NodeID,
 		host:                   cfg.Host,
 		addResolver:            newAddrResolver(&cfg),
-		db:                     &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser, cfg.Logger},
+		DB:                     &localDB{NewSchema(cfg.NodeID, cfg.DB), cfg.DB, cfg.Parser, cfg.Logger},
 		log:                    cfg.Logger,
 		logLevel:               cfg.LogLevel,
 		logJsonFormat:          cfg.LogJSONFormat,
@@ -362,7 +362,7 @@ func (st *Store) onLeaderFound(timeout time.Duration) {
 		}
 
 		// Only leader can restore the old schema
-		if st.IsLeader() && st.db.Schema.len() == 0 && st.loadLegacySchema != nil {
+		if st.IsLeader() && st.DB.Schema.len() == 0 && st.loadLegacySchema != nil {
 			st.log.Info("starting migration from old schema")
 			if err := migrate(); err != nil {
 				st.log.WithError(err).Error("migrate from old schema")
@@ -376,7 +376,7 @@ func (st *Store) onLeaderFound(timeout time.Duration) {
 
 // StoreSchemaV1() is responsible for saving new schema (RAFT) to boltDB
 func (st *Store) StoreSchemaV1() error {
-	return st.saveLegacySchema(st.db.Schema.States())
+	return st.saveLegacySchema(st.DB.Schema.States())
 }
 
 func (st *Store) Close(ctx context.Context) error {
@@ -414,14 +414,14 @@ func (st *Store) Close(ctx context.Context) error {
 	}
 
 	st.log.Info("closing data store ...")
-	if err := st.db.Close(ctx); err != nil {
+	if err := st.DB.Close(ctx); err != nil {
 		return fmt.Errorf(" close database: %w", err)
 	}
 
 	return nil
 }
 
-func (st *Store) SetDB(db Indexer) { st.db.SetIndexer(db) }
+func (st *Store) SetDB(db Indexer) { st.DB.SetIndexer(db) }
 
 func (st *Store) Ready() bool {
 	return st.open.Load() && st.dbLoaded.Load() && st.Leader() != ""
@@ -482,19 +482,19 @@ func (st *Store) IsLeader() bool {
 }
 
 func (st *Store) SchemaReader() retrySchema {
-	return retrySchema{st.db.Schema, st.VersionedSchemaReader()}
+	return retrySchema{st.DB.Schema, st.VersionedSchemaReader()}
 }
 
 func (st *Store) VersionedSchemaReader() versionedSchema {
 	f := func(ctx context.Context, version uint64) error {
 		return st.WaitForAppliedIndex(ctx, time.Millisecond*50, version)
 	}
-	return versionedSchema{st.db.Schema, f}
+	return versionedSchema{st.DB.Schema, f}
 }
 
 // FindSimilarClass returns the name of an existing class with a similar name, and "" otherwise
 func (f *Store) FindSimilarClass(name string) string {
-	return f.db.Schema.ClassEqual(name)
+	return f.DB.Schema.ClassEqual(name)
 }
 
 // Stats returns internal statistics from this store, for informational/debugging purposes only.
@@ -595,7 +595,7 @@ func (st *Store) Execute(req *api.ApplyRequest) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal command: %w", err)
 	}
-	classInfo := st.db.Schema.ClassInfo(req.Class)
+	classInfo := st.DB.Schema.ClassInfo(req.Class)
 	if req.Type == api.ApplyRequest_TYPE_RESTORE_CLASS && classInfo.Exists {
 		st.log.WithField("class", req.Class).Info("class already restored")
 		return 0, fmt.Errorf("class name %s already exists", req.Class)
@@ -686,31 +686,31 @@ func (st *Store) Apply(l *raft.Log) interface{} {
 	switch cmd.Type {
 
 	case api.ApplyRequest_TYPE_ADD_CLASS:
-		ret.Error = st.db.AddClass(&cmd, st.nodeID, schemaOnly)
+		ret.Error = st.DB.AddClass(&cmd, st.nodeID, schemaOnly)
 
 	case api.ApplyRequest_TYPE_RESTORE_CLASS:
-		ret.Error = st.db.RestoreClass(&cmd, st.nodeID, schemaOnly)
+		ret.Error = st.DB.RestoreClass(&cmd, st.nodeID, schemaOnly)
 
 	case api.ApplyRequest_TYPE_UPDATE_CLASS:
-		ret.Error = st.db.UpdateClass(&cmd, st.nodeID, schemaOnly)
+		ret.Error = st.DB.UpdateClass(&cmd, st.nodeID, schemaOnly)
 
 	case api.ApplyRequest_TYPE_DELETE_CLASS:
-		ret.Error = st.db.DeleteClass(&cmd, schemaOnly)
+		ret.Error = st.DB.DeleteClass(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_ADD_PROPERTY:
-		ret.Error = st.db.AddProperty(&cmd, schemaOnly)
+		ret.Error = st.DB.AddProperty(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_UPDATE_SHARD_STATUS:
-		ret.Error = st.db.UpdateShardStatus(&cmd, schemaOnly)
+		ret.Error = st.DB.UpdateShardStatus(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_ADD_TENANT:
-		ret.Error = st.db.AddTenants(&cmd, schemaOnly)
+		ret.Error = st.DB.AddTenants(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_UPDATE_TENANT:
-		ret.Data, ret.Error = st.db.UpdateTenants(&cmd, schemaOnly)
+		ret.Data, ret.Error = st.DB.UpdateTenants(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_DELETE_TENANT:
-		ret.Error = st.db.DeleteTenants(&cmd, schemaOnly)
+		ret.Error = st.DB.DeleteTenants(&cmd, schemaOnly)
 
 	case api.ApplyRequest_TYPE_STORE_SCHEMA_V1:
 		ret.Error = st.StoreSchemaV1()
@@ -744,7 +744,7 @@ func (st *Store) Apply(l *raft.Log) interface{} {
 // be implemented to allow for concurrent updates while a snapshot is happening.
 func (st *Store) Snapshot() (raft.FSMSnapshot, error) {
 	st.log.Info("persisting snapshot")
-	return st.db.Schema, nil
+	return st.DB.Schema, nil
 }
 
 // Restore is used to restore an FSM from a snapshot. It is not called
@@ -758,14 +758,14 @@ func (st *Store) Restore(rc io.ReadCloser) error {
 		}
 	}()
 
-	if err := st.db.Schema.Restore(rc, st.db.parser); err != nil {
+	if err := st.DB.Schema.Restore(rc, st.DB.parser); err != nil {
 		st.log.WithError(err).Error("restoring schema from snapshot")
 		return fmt.Errorf("restore schema from snapshot: %w", err)
 	}
 	st.log.Info("successfully restored schema from snapshot")
 
 	if st.reloadDBFromSnapshot() {
-		st.log.WithField("n", st.db.Schema.len()).
+		st.log.WithField("n", st.DB.Schema.len()).
 			Info("successfully reloaded indexes from snapshot")
 	}
 
@@ -896,12 +896,12 @@ func (st *Store) openDatabase(ctx context.Context) {
 	}
 
 	st.log.Info("loading local db")
-	if err := st.db.Load(ctx, st.nodeID); err != nil {
+	if err := st.DB.Load(ctx, st.nodeID); err != nil {
 		st.log.WithError(err).Error("cannot restore database")
 		panic("error restoring database")
 	}
 
-	st.log.WithField("n", st.db.Schema.len()).Info("database has been successfully loaded")
+	st.log.WithField("n", st.DB.Schema.len()).Info("database has been successfully loaded")
 }
 
 // reloadDBFromSnapshot reloads the node's local db. If the db is already loaded, it will be reloaded.
@@ -931,7 +931,7 @@ func (st *Store) reloadDBFromSnapshot() (success bool) {
 }
 
 func (st *Store) reloadDBFromSchema() {
-	classes := st.db.Schema.MetaClasses()
+	classes := st.DB.Schema.MetaClasses()
 
 	cs := make([]command.UpdateClassRequest, len(classes))
 	i := 0
@@ -941,7 +941,7 @@ func (st *Store) reloadDBFromSchema() {
 	}
 
 	st.log.Info("reload local db: update schema ...")
-	st.db.store.ReloadLocalDB(context.Background(), cs)
+	st.DB.store.ReloadLocalDB(context.Background(), cs)
 	st.dbLoaded.Store(true)
 	st.lastAppliedIndexOnStart.Store(0)
 }

@@ -439,6 +439,7 @@ func (m *Manager) AllowImplicitTenantActivation(class string) bool {
 
 func (m *Manager) ShardOwner(class, shard string) (string, error) {
 	owner, _, err := m.metaWriter.QueryShardOwner(class, shard)
+	fmt.Println("NATEE ShardOwner owner", owner)
 	if err != nil {
 		return "", err
 	}

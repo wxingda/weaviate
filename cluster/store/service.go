@@ -32,7 +32,7 @@ import (
 // Service abstracts away the Raft store, providing clients with an interface that encompasses all write operations.
 // It ensures that these operations are executed on the current leader, regardless of the specific leader in the cluster.
 type Service struct {
-	store *Store
+	Store *Store
 	cl    client
 	log   *logrus.Logger
 }
@@ -46,7 +46,7 @@ type client interface {
 }
 
 func NewService(store *Store, client client) *Service {
-	return &Service{store: store, cl: client, log: store.log}
+	return &Service{Store: store, cl: client, log: store.log}
 }
 
 // Open opens this store service and marked as such.
@@ -54,31 +54,31 @@ func NewService(store *Store, client client) *Service {
 // If there is any old state, such as snapshots, logs, peers, etc., all of those will be restored
 func (s *Service) Open(ctx context.Context, db Indexer) error {
 	s.log.Info("starting raft sub-system ...")
-	s.store.SetDB(db)
-	return s.store.Open(ctx)
+	s.Store.SetDB(db)
+	return s.Store.Open(ctx)
 }
 
 func (s *Service) Close(ctx context.Context) (err error) {
 	s.log.Info("shutting down raft sub-system ...")
 
 	// non-voter can be safely removed, as they don't partake in RAFT elections
-	if !s.store.IsVoter() {
+	if !s.Store.IsVoter() {
 		s.log.Info("removing this node from cluster prior to shutdown ...")
-		if err := s.Remove(ctx, s.store.ID()); err != nil {
+		if err := s.Remove(ctx, s.Store.ID()); err != nil {
 			s.log.WithError(err).Error("remove this node from cluster")
 		} else {
 			s.log.Info("successfully removed this node from the cluster.")
 		}
 	}
-	return s.store.Close(ctx)
+	return s.Store.Close(ctx)
 }
 
 func (s *Service) Ready() bool {
-	return s.store.Ready()
+	return s.Store.Ready()
 }
 
 func (s *Service) SchemaReader() retrySchema {
-	return s.store.SchemaReader()
+	return s.Store.SchemaReader()
 }
 
 func (s *Service) AddClass(cls *models.Class, ss *sharding.State) (uint64, error) {
@@ -87,6 +87,9 @@ func (s *Service) AddClass(cls *models.Class, ss *sharding.State) (uint64, error
 	}
 
 	req := cmd.AddClassRequest{Class: cls, State: ss}
+	for n, p := range ss.Physical {
+		fmt.Println("NATEE Service.AddClass ss BelongsToNodes", n, p.BelongsToNodes)
+	}
 	subCommand, err := json.Marshal(&req)
 	if err != nil {
 		return 0, fmt.Errorf("marshal request: %w", err)
@@ -240,14 +243,14 @@ func (s *Service) Execute(req *cmd.ApplyRequest) (uint64, error) {
 		))
 	defer t.ObserveDuration()
 
-	if s.store.IsLeader() {
-		return s.store.Execute(req)
+	if s.Store.IsLeader() {
+		return s.Store.Execute(req)
 	}
 	if cmd.ApplyRequest_Type_name[int32(req.Type.Number())] == "" {
 		return 0, ErrUnknownCommand
 	}
 
-	leader := s.store.Leader()
+	leader := s.Store.Leader()
 	if leader == "" {
 		return 0, s.leaderErr()
 	}
@@ -265,10 +268,10 @@ func (s *Service) Join(ctx context.Context, id, addr string, voter bool) error {
 		"address": addr,
 		"voter":   voter,
 	}).Debug("membership.join")
-	if s.store.IsLeader() {
-		return s.store.Join(id, addr, voter)
+	if s.Store.IsLeader() {
+		return s.Store.Join(id, addr, voter)
 	}
-	leader := s.store.Leader()
+	leader := s.Store.Leader()
 	if leader == "" {
 		return s.leaderErr()
 	}
@@ -279,10 +282,10 @@ func (s *Service) Join(ctx context.Context, id, addr string, voter bool) error {
 
 func (s *Service) Remove(ctx context.Context, id string) error {
 	s.log.WithField("id", id).Debug("membership.remove")
-	if s.store.IsLeader() {
-		return s.store.Remove(id)
+	if s.Store.IsLeader() {
+		return s.Store.Remove(id)
 	}
-	leader := s.store.Leader()
+	leader := s.Store.Leader()
 	if leader == "" {
 		return s.leaderErr()
 	}
@@ -293,18 +296,18 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 
 func (s *Service) Stats() map[string]any {
 	s.log.Debug("membership.stats")
-	return s.store.Stats()
+	return s.Store.Stats()
 }
 
 // LeaderWithID is used to return the current leader address and ID of the cluster.
 // It may return empty strings if there is no current leader or the leader is unknown.
 func (s *Service) LeaderWithID() (string, string) {
-	addr, id := s.store.LeaderWithID()
+	addr, id := s.Store.LeaderWithID()
 	return string(addr), string(id)
 }
 
 func (s *Service) WaitUntilDBRestored(ctx context.Context, period time.Duration, close chan struct{}) error {
-	return s.store.WaitToRestoreDB(ctx, period, close)
+	return s.Store.WaitToRestoreDB(ctx, period, close)
 }
 
 // QueryReadOnlyClass will verify that class is non empty and then build a Query that will be directed to the leader to
@@ -429,6 +432,7 @@ func (s *Service) QueryShardOwner(class, shard string) (string, uint64, error) {
 		return "", 0, fmt.Errorf("failed to unmarshal query result: %w", err)
 	}
 
+	fmt.Println("NATEE QueryShardOwner", resp.Owner)
 	return resp.Owner, resp.ShardVersion, nil
 }
 
@@ -499,11 +503,11 @@ func (s *Service) Query(ctx context.Context, req *cmd.QueryRequest) (*cmd.QueryR
 		))
 	defer t.ObserveDuration()
 
-	if s.store.IsLeader() {
-		return s.store.Query(req)
+	if s.Store.IsLeader() {
+		return s.Store.Query(req)
 	}
 
-	leader := s.store.Leader()
+	leader := s.Store.Leader()
 	if leader == "" {
 		return &cmd.QueryResponse{}, s.leaderErr()
 	}
@@ -527,9 +531,9 @@ func removeNilTenants(tenants []*cmd.Tenant) []*cmd.Tenant {
 // and if it can't reach the other nodes either for intercluster
 // communication issues or other nodes were down.
 func (s *Service) leaderErr() error {
-	if s.store.addResolver != nil && len(s.store.addResolver.notResolvedNodes) > 0 {
+	if s.Store.addResolver != nil && len(s.Store.addResolver.notResolvedNodes) > 0 {
 		var nodes []string
-		for n := range s.store.addResolver.notResolvedNodes {
+		for n := range s.Store.addResolver.notResolvedNodes {
 			nodes = append(nodes, string(n))
 		}
 

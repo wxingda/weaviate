@@ -48,6 +48,9 @@ func (db *localDB) AddClass(cmd *command.ApplyRequest, nodeID string, schemaOnly
 	if req.State == nil {
 		return fmt.Errorf("%w: nil sharding state", errBadRequest)
 	}
+	for i, p := range req.State.Physical {
+		fmt.Println("NATEE localDB.AddClass BelongsToNodes", i, p.BelongsToNodes)
+	}
 	if err := db.parser.ParseClass(req.Class); err != nil {
 		return fmt.Errorf("%w: parsing class: %w", errBadRequest, err)
 	}

@@ -99,11 +99,13 @@ func (ri *RemoteIndex) PutObject(ctx context.Context, shardName string,
 	obj *storobj.Object, schemaVersion uint64,
 ) error {
 	owner, err := ri.stateGetter.ShardOwner(ri.class, shardName)
+	fmt.Println("NATEE PutObject owner", owner)
 	if err != nil {
 		return fmt.Errorf("class %s has no physical shard %q: %w", ri.class, shardName, err)
 	}
 
 	host, ok := ri.nodeResolver.NodeHostname(owner)
+	fmt.Println("NATEE PutObject host", host)
 	if !ok {
 		return errors.Errorf("resolve node name %q to host", owner)
 	}
@@ -210,11 +212,13 @@ func (ri *RemoteIndex) GetObject(ctx context.Context, shardName string,
 	additional additional.Properties,
 ) (*storobj.Object, error) {
 	owner, err := ri.stateGetter.ShardOwner(ri.class, shardName)
+	fmt.Println("NATEE GetObject owner", owner)
 	if err != nil {
 		return nil, fmt.Errorf("class %s has no physical shard %q: %w", ri.class, shardName, err)
 	}
 
 	host, ok := ri.nodeResolver.NodeHostname(owner)
+	fmt.Println("NATEE GetObject host", host)
 	if !ok {
 		return nil, errors.Errorf("resolve node name %q to host", owner)
 	}

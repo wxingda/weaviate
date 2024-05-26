@@ -94,7 +94,10 @@ func (m *metaClass) ShardOwner(shard string) (string, uint64, error) {
 	if len(x.BelongsToNodes) < 1 || x.BelongsToNodes[0] == "" {
 		return "", 0, fmt.Errorf("owner node not found")
 	}
-	return x.BelongsToNodes[0], m.version(), nil
+	r := x.BelongsToNodes[0]
+	// TODO do we only call this if there's 1 replica? confusing behavior if someone accidentally calls it on something with replication > 1
+	fmt.Println("NATEE metaClass.ShardOwner", r)
+	return r, m.version(), nil
 }
 
 // ShardFromUUID returns shard name of the provided uuid

@@ -77,7 +77,7 @@ func (st *Store) QueryReadOnlyClasses(req *cmd.QueryRequest) ([]byte, error) {
 	}
 
 	// Read the meta class to get both the class and sharding information
-	vclasses := st.db.Schema.ReadOnlyClasses(subCommand.Classes...)
+	vclasses := st.DB.Schema.ReadOnlyClasses(subCommand.Classes...)
 	if len(vclasses) == 0 {
 		return []byte{}, nil
 	}
@@ -95,7 +95,7 @@ func (st *Store) QueryReadOnlyClasses(req *cmd.QueryRequest) ([]byte, error) {
 
 func (st *Store) QuerySchema() ([]byte, error) {
 	// Build the response, marshal and return
-	response := cmd.QuerySchemaResponse{Schema: st.db.Schema.ReadOnlySchema()}
+	response := cmd.QuerySchemaResponse{Schema: st.DB.Schema.ReadOnlySchema()}
 	payload, err := json.Marshal(&response)
 	if err != nil {
 		return []byte{}, fmt.Errorf("could not marshal query response: %w", err)
@@ -111,7 +111,7 @@ func (st *Store) QueryTenants(req *cmd.QueryRequest) ([]byte, error) {
 	}
 
 	// Read the tenants
-	tenants, err := st.db.Schema.getTenants(subCommand.Class, subCommand.Tenants)
+	tenants, err := st.DB.Schema.getTenants(subCommand.Class, subCommand.Tenants)
 	if err != nil {
 		return []byte{}, fmt.Errorf("could not get tenants: %w", err)
 	}
@@ -133,7 +133,8 @@ func (st *Store) QueryShardOwner(req *cmd.QueryRequest) ([]byte, error) {
 	}
 
 	// Read the meta class to get both the class and sharding information
-	owner, version, err := st.db.Schema.ShardOwner(subCommand.Class, subCommand.Shard)
+	owner, version, err := st.DB.Schema.ShardOwner(subCommand.Class, subCommand.Shard)
+	fmt.Println("NATEE Store.QueryShardOwner owner", owner)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -155,7 +156,7 @@ func (st *Store) QueryTenantsShards(req *cmd.QueryRequest) ([]byte, error) {
 	}
 
 	// Read the meta class to get both the class and sharding information
-	tenants, version := st.db.Schema.TenantsShards(subCommand.Class, subCommand.Tenants...)
+	tenants, version := st.DB.Schema.TenantsShards(subCommand.Class, subCommand.Tenants...)
 	// Build the response, marshal and return
 	response := cmd.QueryTenantsShardsResponse{TenantsActivityStatus: tenants, SchemaVersion: version}
 	payload, err := json.Marshal(&response)
@@ -172,7 +173,7 @@ func (st *Store) QueryShardingState(req *cmd.QueryRequest) ([]byte, error) {
 		return []byte{}, fmt.Errorf("%w: %w", errBadRequest, err)
 	}
 
-	state, version := st.db.Schema.CopyShardingState(subCommand.Class)
+	state, version := st.DB.Schema.CopyShardingState(subCommand.Class)
 	// Build the response, marshal and return
 	response := cmd.QueryShardingStateResponse{State: state, Version: version}
 	payload, err := json.Marshal(&response)

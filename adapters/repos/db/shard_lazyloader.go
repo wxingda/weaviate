@@ -188,6 +188,7 @@ func (l *LazyLoadShard) GetPropertyLengthTracker() *inverted.JsonPropertyLengthT
 }
 
 func (l *LazyLoadShard) PutObject(ctx context.Context, object *storobj.Object) error {
+	fmt.Println("NATEE lazy PutObject")
 	if err := l.Load(ctx); err != nil {
 		return err
 	}
@@ -202,6 +203,7 @@ func (l *LazyLoadShard) PutObjectBatch(ctx context.Context, objects []*storobj.O
 }
 
 func (l *LazyLoadShard) ObjectByID(ctx context.Context, id strfmt.UUID, props search.SelectProperties, additional additional.Properties) (*storobj.Object, error) {
+	fmt.Println("NATEE lazy ObjectByID id", id)
 	if err := l.Load(ctx); err != nil {
 		return nil, err
 	}

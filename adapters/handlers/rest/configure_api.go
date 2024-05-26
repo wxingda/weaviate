@@ -37,6 +37,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/clients"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/clusterapi"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/operations"
+	"github.com/weaviate/weaviate/adapters/handlers/rest/operations/shardmovements"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/state"
 	"github.com/weaviate/weaviate/adapters/handlers/rest/tenantactivity"
 	"github.com/weaviate/weaviate/adapters/repos/classifications"
@@ -474,6 +475,11 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 	api.Logger = func(msg string, args ...interface{}) {
 		appState.Logger.WithField("action", "restapi_management").Infof(msg, args...)
 	}
+
+	sm := ShardMovement{
+		ClusterService: appState.ClusterService,
+	}
+	api.ShardmovementsShardmovementsCreateHandler = shardmovements.ShardmovementsCreateHandlerFunc(sm.addShardMovement)
 
 	classifier := classification.New(appState.SchemaManager, appState.ClassificationRepo, appState.DB, // the DB is the vectorrepo
 		appState.Authorizer,

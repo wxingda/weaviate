@@ -43,6 +43,7 @@ func (s *Shard) PutObject(ctx context.Context, object *storobj.Object) error {
 }
 
 func (s *Shard) putOne(ctx context.Context, uuid []byte, object *storobj.Object) error {
+	fmt.Println("NATEE putOne uuid", uuid)
 	status, err := s.putObjectLSM(object, uuid)
 	if err != nil {
 		return errors.Wrap(err, "store object in LSM store")

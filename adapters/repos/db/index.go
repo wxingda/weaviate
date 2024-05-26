@@ -625,6 +625,7 @@ func (i *Index) putObject(ctx context.Context, object *storobj.Object,
 	}
 
 	shardName, err := i.determineObjectShard(object.ID(), object.Object.Tenant)
+	fmt.Println("NATEE putObject shardName", shardName)
 	if err != nil {
 		return objects.NewErrInvalidUserInput("determine shard: %v", err)
 	}
@@ -642,11 +643,13 @@ func (i *Index) putObject(ctx context.Context, object *storobj.Object,
 
 	// no replication, remote shard (or local not yet inited)
 	shard, release, err := i.getLocalShardNoShutdown(shardName)
+	fmt.Println("NATEE putObject shard", shard)
 	if err != nil {
 		return err
 	}
 
 	if shard == nil {
+		fmt.Println("NATEE putObject schemaVersion", schemaVersion)
 		if err := i.remote.PutObject(ctx, shardName, object, schemaVersion); err != nil {
 			return fmt.Errorf("put remote object: shard=%q: %w", shardName, err)
 		}
@@ -998,6 +1001,7 @@ func (i *Index) objectByID(ctx context.Context, id strfmt.UUID,
 	}
 
 	shardName, err := i.determineObjectShard(id, tenant)
+	fmt.Println("NATEE objectByID shardName", shardName)
 	if err != nil {
 		switch err.(type) {
 		case objects.ErrMultiTenancy:

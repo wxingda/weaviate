@@ -1559,6 +1559,23 @@
         }
       }
     },
+    "ShardMovement": {
+      "properties": {
+        "shardName": {
+          "description": "name of the shard...id?",
+          "type": "string"
+        },
+        "fromNode": {
+          "description": "node ID to move replica from",
+          "type": "string"
+        },
+        "toNode": {
+          "description": "node ID to move replica to",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Object": {
       "properties": {
         "class": {
@@ -2293,6 +2310,39 @@
           "well-known",
           "oidc",
           "discovery"
+        ],
+        "x-available-in-mqtt": false,
+        "x-available-in-websocket": false
+      }
+    },
+    "/shardmovements": {
+      "post": {
+        "description": "Creates a shard movement operation",
+        "operationId": "shardmovements.create",
+        "x-serviceIds": [
+          "weaviate.local.shardmovement"
+        ],
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ShardMovement created.",
+            "schema": {
+              "$ref": "#/definitions/ShardMovement"
+            }
+          }
+        },
+        "summary": "Create shard movement",
+        "tags": [
+          "shardmovements"
         ],
         "x-available-in-mqtt": false,
         "x-available-in-websocket": false

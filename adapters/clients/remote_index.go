@@ -51,6 +51,7 @@ func (c *RemoteIndex) PutObject(ctx context.Context, host, index,
 	shard string, obj *storobj.Object, schemaVersion uint64,
 ) error {
 	path := fmt.Sprintf("/indices/%s/shards/%s/objects", index, shard)
+	fmt.Println("NATEE PutObject host path", host, path)
 	method := http.MethodPost
 	value := []string{strconv.FormatUint(schemaVersion, 10)}
 	url := url.URL{
@@ -188,6 +189,7 @@ func (c *RemoteIndex) GetObject(ctx context.Context, hostName, indexName,
 	additionalEncoded := base64.StdEncoding.EncodeToString(additionalBytes)
 
 	path := fmt.Sprintf("/indices/%s/shards/%s/objects/%s", indexName, shardName, id)
+	fmt.Println("NATEE GetObject host path", hostName, path)
 	method := http.MethodGet
 	url := url.URL{Scheme: "http", Host: hostName, Path: path}
 	q := url.Query()

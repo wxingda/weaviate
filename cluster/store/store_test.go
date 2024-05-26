@@ -82,16 +82,16 @@ func TestServiceEndpoints(t *testing.T) {
 	assert.Nil(t, srv.Open(ctx, m.indexer))
 
 	// node lose leadership after service call
-	assert.ErrorIs(t, srv.store.Join(m.store.nodeID, addr, true), ErrNotLeader)
-	assert.ErrorIs(t, srv.store.Remove(m.store.nodeID), ErrNotLeader)
+	assert.ErrorIs(t, srv.Store.Join(m.store.nodeID, addr, true), ErrNotLeader)
+	assert.ErrorIs(t, srv.Store.Remove(m.store.nodeID), ErrNotLeader)
 
 	// Connect
-	assert.Nil(t, srv.store.Notify(m.cfg.NodeID, addr))
+	assert.Nil(t, srv.Store.Notify(m.cfg.NodeID, addr))
 
 	assert.Nil(t, srv.WaitUntilDBRestored(ctx, time.Second*1, make(chan struct{})))
 	assert.True(t, tryNTimesWithWait(10, time.Millisecond*200, srv.Ready))
-	tryNTimesWithWait(20, time.Millisecond*100, srv.store.IsLeader)
-	assert.True(t, srv.store.IsLeader())
+	tryNTimesWithWait(20, time.Millisecond*100, srv.Store.IsLeader)
+	assert.True(t, srv.Store.IsLeader())
 	schema := srv.SchemaReader()
 	assert.Equal(t, schema.Len(), 0)
 
@@ -195,9 +195,9 @@ func TestServiceEndpoints(t *testing.T) {
 	info.ClassVersion = version
 	info.ShardVersion = version0
 	assert.Nil(t, err)
-	assert.Nil(t, srv.store.WaitForAppliedIndex(ctx, time.Millisecond*10, version))
+	assert.Nil(t, srv.Store.WaitForAppliedIndex(ctx, time.Millisecond*10, version))
 	assert.Equal(t, info, schema.ClassInfo("C"))
-	assert.ErrorIs(t, srv.store.WaitForAppliedIndex(ctx, time.Millisecond*10, srv.store.lastAppliedIndex.Load()+1), ErrDeadlineExceeded)
+	assert.ErrorIs(t, srv.Store.WaitForAppliedIndex(ctx, time.Millisecond*10, srv.Store.lastAppliedIndex.Load()+1), ErrDeadlineExceeded)
 
 	// DeleteClass
 	_, err = srv.DeleteClass("X")
@@ -264,11 +264,11 @@ func TestServiceEndpoints(t *testing.T) {
 
 	// Self Join
 	assert.Nil(t, srv.Join(ctx, m.store.nodeID, addr, true))
-	assert.True(t, srv.store.IsLeader())
+	assert.True(t, srv.Store.IsLeader())
 	assert.Nil(t, srv.Join(ctx, m.store.nodeID, addr, false))
-	assert.True(t, srv.store.IsLeader())
+	assert.True(t, srv.Store.IsLeader())
 	assert.ErrorContains(t, srv.Remove(ctx, m.store.nodeID), "configuration")
-	assert.True(t, srv.store.IsLeader())
+	assert.True(t, srv.Store.IsLeader())
 
 	// Stats
 	stats := srv.Stats()
@@ -290,22 +290,22 @@ func TestServiceEndpoints(t *testing.T) {
 	assert.Equal(t, m.store.nodeID, leaderID)
 
 	// create snapshot
-	assert.Nil(t, srv.store.raft.Barrier(2*time.Second).Error())
-	assert.Nil(t, srv.store.raft.Snapshot().Error())
+	assert.Nil(t, srv.Store.raft.Barrier(2*time.Second).Error())
+	assert.Nil(t, srv.Store.raft.Snapshot().Error())
 
 	// restore from snapshot
 	assert.Nil(t, srv.Close(ctx))
-	srv.store.db.Schema.clear()
+	srv.Store.DB.Schema.clear()
 
 	s := New(m.cfg)
 	m.store = &s
 	srv = NewService(m.store, nil)
 	assert.Nil(t, srv.Open(ctx, m.indexer))
-	assert.Nil(t, srv.store.Notify(m.cfg.NodeID, addr))
+	assert.Nil(t, srv.Store.Notify(m.cfg.NodeID, addr))
 	assert.Nil(t, srv.WaitUntilDBRestored(ctx, time.Second*1, make(chan struct{})))
 	assert.True(t, tryNTimesWithWait(10, time.Millisecond*200, srv.Ready))
-	tryNTimesWithWait(20, time.Millisecond*100, srv.store.IsLeader)
-	clInfo := srv.store.db.Schema.ClassInfo("C")
+	tryNTimesWithWait(20, time.Millisecond*100, srv.Store.IsLeader)
+	clInfo := srv.Store.DB.Schema.ClassInfo("C")
 	assert.Equal(t, info, clInfo)
 }
 
@@ -358,7 +358,7 @@ func TestServiceClose(t *testing.T) {
 	srv := NewService(m.store, nil)
 	m.indexer.On("Open", mock.Anything).Return(nil)
 	assert.Nil(t, srv.Open(ctx, m.indexer))
-	assert.Nil(t, srv.store.Notify(m.cfg.NodeID, addr))
+	assert.Nil(t, srv.Store.Notify(m.cfg.NodeID, addr))
 	close := make(chan struct{})
 	go func() {
 		time.Sleep(time.Second)
@@ -455,7 +455,7 @@ func TestStoreApply(t *testing.T) {
 				m.indexer.On("TriggerSchemaUpdateCallbacks").Return()
 			},
 			doAfter: func(ms *MockStore) error {
-				_, ok := ms.store.db.Schema.Classes["C1"]
+				_, ok := ms.store.DB.Schema.Classes["C1"]
 				if !ok {
 					return fmt.Errorf("class is missing")
 				}
@@ -487,7 +487,7 @@ func TestStoreApply(t *testing.T) {
 			doBefore: func(m *MockStore) {
 				m.indexer.On("Open", mock.Anything).Return(nil)
 				m.parser.On("ParseClass", mock.Anything).Return(nil)
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 			},
 		},
 		{
@@ -504,7 +504,7 @@ func TestStoreApply(t *testing.T) {
 				m.indexer.On("TriggerSchemaUpdateCallbacks").Return()
 			},
 			doAfter: func(ms *MockStore) error {
-				_, ok := ms.store.db.Schema.Classes["C1"]
+				_, ok := ms.store.DB.Schema.Classes["C1"]
 				if !ok {
 					return fmt.Errorf("class is missing")
 				}
@@ -539,7 +539,7 @@ func TestStoreApply(t *testing.T) {
 			resp: Response{Error: errBadRequest},
 			doBefore: func(m *MockStore) {
 				m.indexer.On("Open", mock.Anything).Return(nil)
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 				m.parser.On("ParseClassUpdate", mock.Anything, mock.Anything).Return(nil, errAny)
 			},
 		},
@@ -554,7 +554,7 @@ func TestStoreApply(t *testing.T) {
 				m.indexer.On("Open", mock.Anything).Return(nil)
 				m.parser.On("ParseClassUpdate", mock.Anything, mock.Anything).Return(mock.Anything, nil)
 				m.indexer.On("UpdateClass", mock.Anything).Return(nil)
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 				m.indexer.On("TriggerSchemaUpdateCallbacks").Return()
 			},
 		},
@@ -569,7 +569,7 @@ func TestStoreApply(t *testing.T) {
 				m.indexer.On("TriggerSchemaUpdateCallbacks").Return()
 			},
 			doAfter: func(ms *MockStore) error {
-				if _, ok := ms.store.db.Schema.Classes["C1"]; ok {
+				if _, ok := ms.store.DB.Schema.Classes["C1"]; ok {
 					return fmt.Errorf("class still exits")
 				}
 				return nil
@@ -598,7 +598,7 @@ func TestStoreApply(t *testing.T) {
 			resp: Response{Error: errBadRequest},
 			doBefore: func(m *MockStore) {
 				doFirst(m)
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 			},
 		},
 		{
@@ -609,13 +609,13 @@ func TestStoreApply(t *testing.T) {
 			},
 			resp: Response{Error: nil},
 			doBefore: func(m *MockStore) {
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 				m.indexer.On("AddProperty", mock.Anything, mock.Anything).Return(nil)
 				m.indexer.On("TriggerSchemaUpdateCallbacks").Return()
 			},
 			doAfter: func(ms *MockStore) error {
 				ok := false
-				for _, p := range ms.store.db.Schema.Classes["C1"].Class.Properties {
+				for _, p := range ms.store.DB.Schema.Classes["C1"].Class.Properties {
 					if p.Name == "P1" {
 						ok = true
 						break
@@ -667,14 +667,14 @@ func TestStoreApply(t *testing.T) {
 			})},
 			resp: Response{Error: nil},
 			doBefore: func(m *MockStore) {
-				m.store.db.Schema.addClass(cls, &sharding.State{
+				m.store.DB.Schema.addClass(cls, &sharding.State{
 					Physical: map[string]sharding.Physical{"T1": {}},
 				}, 1)
 
 				m.indexer.On("AddTenants", mock.Anything, mock.Anything).Return(nil)
 			},
 			doAfter: func(ms *MockStore) error {
-				if _, ok := ms.store.db.Schema.Classes["C1"].Sharding.Physical["T1"]; !ok {
+				if _, ok := ms.store.DB.Schema.Classes["C1"].Sharding.Physical["T1"]; !ok {
 					return fmt.Errorf("tenant is missing")
 				}
 				return nil
@@ -703,7 +703,7 @@ func TestStoreApply(t *testing.T) {
 			doBefore: func(m *MockStore) {
 				ss := &sharding.State{Physical: map[string]sharding.Physical{}}
 				doFirst(m)
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 			},
 		},
 		{
@@ -729,7 +729,7 @@ func TestStoreApply(t *testing.T) {
 					BelongsToNodes: []string{"NODE-2"},
 					Status:         models.TenantActivityStatusHOT,
 				}}}
-				m.store.db.Schema.addClass(cls, ss, 1)
+				m.store.DB.Schema.addClass(cls, ss, 1)
 				m.indexer.On("UpdateTenants", mock.Anything, mock.Anything).Return(nil)
 			},
 			doAfter: func(ms *MockStore) error {
@@ -746,7 +746,7 @@ func TestStoreApply(t *testing.T) {
 					BelongsToNodes: []string{"NODE-2"},
 					Status:         models.TenantActivityStatusCOLD,
 				}}
-				cls := ms.store.db.Schema.Classes["C1"]
+				cls := ms.store.DB.Schema.Classes["C1"]
 				if got := cls.Sharding.Physical; !reflect.DeepEqual(got, want) {
 					return fmt.Errorf("physical state want: %v got: %v", want, got)
 				}
@@ -772,11 +772,11 @@ func TestStoreApply(t *testing.T) {
 				nil, &cmd.DeleteTenantsRequest{Tenants: []string{"T1", "T2"}})},
 			resp: Response{Error: nil},
 			doBefore: func(m *MockStore) {
-				m.store.db.Schema.addClass(cls, &sharding.State{Physical: map[string]sharding.Physical{"T1": {}}}, 1)
+				m.store.DB.Schema.addClass(cls, &sharding.State{Physical: map[string]sharding.Physical{"T1": {}}}, 1)
 				m.indexer.On("DeleteTenants", mock.Anything, mock.Anything).Return(nil)
 			},
 			doAfter: func(ms *MockStore) error {
-				if len(ms.store.db.Schema.Classes["C1"].Sharding.Physical) != 0 {
+				if len(ms.store.DB.Schema.Classes["C1"].Sharding.Physical) != 0 {
 					return fmt.Errorf("sharding state mus be empty after deletion")
 				}
 				return nil
