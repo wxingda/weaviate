@@ -255,10 +255,6 @@ func (st *Store) Open(ctx context.Context) (err error) {
 		// this should include empty and non empty node
 		st.openDatabase(ctx)
 	}
-	// if empty node report ready
-	if st.lastAppliedIndexOnStart.Load() == 0 {
-		st.dbLoaded.Store(true)
-	}
 
 	st.lastAppliedIndex.Store(st.raft.AppliedIndex())
 
@@ -272,7 +268,11 @@ func (st *Store) Open(ctx context.Context) (err error) {
 
 	// There's no hard limit on the migration, so it should take as long as necessary.
 	// However, we believe that 1 day should be more than sufficient.
-	go st.onLeaderFound(time.Hour * 24)
+	// if empty node report ready
+	if st.lastAppliedIndexOnStart.Load() == 0 && snapshotIndex(st.snapshotStore) == 0 {
+		st.dbLoaded.Store(true)
+		go st.onLeaderFound(time.Hour * 24)
+	}
 
 	return nil
 }
@@ -764,7 +764,8 @@ func (st *Store) Restore(rc io.ReadCloser) error {
 	}
 	st.log.Info("successfully restored schema from snapshot")
 
-	if st.reloadDBFromSnapshot() {
+	if snapshotIndex(st.snapshotStore) >= st.lastAppliedIndexOnStart.Load() {
+		st.reloadDBFromSchema()
 		st.log.WithField("n", st.db.Schema.len()).
 			Info("successfully reloaded indexes from snapshot")
 	}
@@ -910,25 +911,25 @@ func (st *Store) openDatabase(ctx context.Context) {
 //
 // In specific scenarios where the follower's state is too far behind the leader's log,
 // the leader may decide to send a snapshot. Consequently, the follower must update its state accordingly.
-func (st *Store) reloadDBFromSnapshot() (success bool) {
-	defer func() {
-		if success {
-			st.reloadDBFromSchema()
-		}
-	}()
+// func (st *Store) reloadDBFromSnapshot() (success bool) {
+// 	defer func() {
+// 		if success {
+// 			st.reloadDBFromSchema()
+// 		}
+// 	}()
 
-	if !st.dbLoaded.CompareAndSwap(true, false) {
-		// the snapshot already includes the state from the raft log
-		snapIndex := snapshotIndex(st.snapshotStore)
-		st.log.WithFields(logrus.Fields{
-			"last_applied_index":           st.lastAppliedIndex.Load(),
-			"last_store_log_applied_index": st.lastAppliedIndexOnStart.Load(),
-			"last_snapshot_index":          snapIndex,
-		}).Info("load local db from snapshot")
-		return st.lastAppliedIndexOnStart.Load() <= snapIndex
-	}
-	return true
-}
+// 	if !st.dbLoaded.CompareAndSwap(true, false) {
+// 		// the snapshot already includes the state from the raft log
+// 		snapIndex := snapshotIndex(st.snapshotStore)
+// 		st.log.WithFields(logrus.Fields{
+// 			"last_applied_index":           st.lastAppliedIndex.Load(),
+// 			"last_store_log_applied_index": st.lastAppliedIndexOnStart.Load(),
+// 			"last_snapshot_index":          snapIndex,
+// 		}).Info("load local db from snapshot")
+// 		return st.lastAppliedIndexOnStart.Load() <= snapIndex
+// 	}
+// 	return true
+// }
 
 func (st *Store) reloadDBFromSchema() {
 	classes := st.db.Schema.MetaClasses()
@@ -941,7 +942,9 @@ func (st *Store) reloadDBFromSchema() {
 	}
 
 	st.log.Info("reload local db: update schema ...")
-	st.db.store.ReloadLocalDB(context.Background(), cs)
+	if err := st.db.store.ReloadLocalDB(context.Background(), cs); err != nil {
+		panic(err)
+	}
 	st.dbLoaded.Store(true)
 	st.lastAppliedIndexOnStart.Store(0)
 }

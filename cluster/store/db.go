@@ -100,9 +100,6 @@ func (db *localDB) UpdateClass(cmd *command.ApplyRequest, nodeID string, schemaO
 	if err := json.Unmarshal(cmd.SubCommand, &req); err != nil {
 		return fmt.Errorf("%w: %w", errBadRequest, err)
 	}
-	if req.State != nil {
-		req.State.SetLocalName(nodeID)
-	}
 
 	update := func(meta *metaClass) error {
 		u, err := db.parser.ParseClassUpdate(&meta.Class, req.Class)
@@ -112,11 +109,14 @@ func (db *localDB) UpdateClass(cmd *command.ApplyRequest, nodeID string, schemaO
 		meta.Class.VectorIndexConfig = u.VectorIndexConfig
 		meta.Class.InvertedIndexConfig = u.InvertedIndexConfig
 		meta.Class.VectorConfig = u.VectorConfig
-		meta.Class.ReplicationConfig = u.ReplicationConfig
+		if meta.Class.ReplicationConfig.Factor < u.ReplicationConfig.Factor {
+			meta.Class.ReplicationConfig = u.ReplicationConfig
+		}
 		meta.Class.MultiTenancyConfig = u.MultiTenancyConfig
 		meta.Class.Description = u.Description
 		meta.ClassVersion = cmd.Version
 		if req.State != nil {
+			req.State.SetLocalName(nodeID)
 			meta.Sharding = *req.State
 		}
 		return nil

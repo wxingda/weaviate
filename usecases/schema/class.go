@@ -212,7 +212,13 @@ func (h *Handler) UpdateClass(ctx context.Context, principal *models.Principal,
 		return err
 	}
 
-	initial := h.metaReader.ReadOnlyClass(className)
+	vclasses, err := h.metaWriter.QueryReadOnlyClasses(className)
+	if err != nil {
+		return err
+	}
+
+	vclass := vclasses[className]
+	initial := vclass.Class
 	var shardingState *sharding.State
 
 	// first layer of defense is basic validation if class already exists
