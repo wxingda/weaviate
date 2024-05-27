@@ -337,7 +337,7 @@ jobs:
         env:
           PREVIEW_TAG: "${{ steps.push-container.outputs.PREVIEW_TAG }}"
         run: ./ci/generate_docker_report.sh
-  Push-Docker-fast:    
+  push-docker-fast:
     name: push-docker
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.head.repo.fork }}  && startsWith(github.ref, 'refs/heads/build') 
