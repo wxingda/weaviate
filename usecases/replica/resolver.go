@@ -55,6 +55,7 @@ type resolver struct {
 func (r *resolver) State(shardName string, cl ConsistencyLevel, directCandidate string) (res rState, err error) {
 	res.CLevel = cl
 	m, err := r.Schema.ResolveParentNodes(r.Class, shardName)
+	fmt.Println("NATEE usecases/replica.resolver.State m", m)
 	if err != nil {
 		return res, err
 	}

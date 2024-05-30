@@ -99,6 +99,7 @@ func (ri *RemoteIndex) PutObject(ctx context.Context, shardName string,
 	obj *storobj.Object, schemaVersion uint64,
 ) error {
 	owner, err := ri.stateGetter.ShardOwner(ri.class, shardName)
+	fmt.Println("NATEE usecases/sharding.RemoteIndex.PutObject owner", owner)
 	if err != nil {
 		return fmt.Errorf("class %s has no physical shard %q: %w", ri.class, shardName, err)
 	}

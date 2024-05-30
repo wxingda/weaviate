@@ -13,6 +13,7 @@ package cluster
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -196,7 +197,13 @@ func (s *State) StorageNodes() []string {
 // Candidates returns list of nodes (names) sorted by the
 // free amount of disk space in descending order
 func (s *State) Candidates() []string {
-	return s.delegate.sortCandidates(s.StorageNodes())
+	n := s.StorageNodes()
+	rand.Shuffle(len(n), func(i, j int) {
+		n[i], n[j] = n[j], n[i]
+	})
+	fmt.Println("NATEE usecases/cluster.State.Candidates n", n)
+	return n
+	// return s.delegate.sortCandidates(s.StorageNodes())
 }
 
 // All node names (not their hostnames!) for live members, including self.

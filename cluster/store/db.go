@@ -115,9 +115,12 @@ func (db *localDB) UpdateClass(cmd *command.ApplyRequest, nodeID string, schemaO
 		meta.Class.ReplicationConfig = u.ReplicationConfig
 		meta.Class.MultiTenancyConfig = u.MultiTenancyConfig
 		meta.ClassVersion = cmd.Version
+		shardName := "TODO"
 		if req.State != nil {
 			meta.Sharding = *req.State
+			fmt.Println("NATEE cluster/store.localDB.UpdateClass req.State", req.State.Physical[shardName].BelongsToNodes)
 		}
+		fmt.Println("NATEE cluster/store.localDB.UpdateClass meta.Sharding.Physical", meta.Sharding.Physical[shardName].BelongsToNodes)
 		return nil
 	}
 

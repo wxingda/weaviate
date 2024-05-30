@@ -94,7 +94,9 @@ func (m *metaClass) ShardOwner(shard string) (string, uint64, error) {
 	if len(x.BelongsToNodes) < 1 || x.BelongsToNodes[0] == "" {
 		return "", 0, fmt.Errorf("owner node not found")
 	}
-	return x.BelongsToNodes[0], m.version(), nil
+	r := x.BelongsToNodes[0]
+	fmt.Println("NATEE cluster/store.metaClass.ShardOwner r", r)
+	return r, m.version(), nil
 }
 
 // ShardFromUUID returns shard name of the provided uuid
@@ -112,6 +114,7 @@ func (m *metaClass) ShardReplicas(shard string) ([]string, uint64, error) {
 	if !ok {
 		return nil, 0, errShardNotFound
 	}
+	fmt.Println("NATEE cluster/store.metaClass.ShardReplicas x.BelongsToNodes", x.BelongsToNodes)
 	return slices.Clone(x.BelongsToNodes), m.version(), nil
 }
 

@@ -77,6 +77,7 @@ func (p Physical) BelongsToNode() string {
 
 // AdjustReplicas shrinks or extends the replica set (p.BelongsToNodes)
 func (p *Physical) AdjustReplicas(count int, nodes nodes) error {
+	fmt.Println("NATEE usecases/sharding.Physical.AdjustReplicas p.BelongsToNodes before", p.BelongsToNodes)
 	if count < 0 {
 		return fmt.Errorf("negative replication factor: %d", count)
 	}
@@ -114,7 +115,7 @@ func (p *Physical) AdjustReplicas(count int, nodes nodes) error {
 			break
 		}
 	}
-
+	fmt.Println("NATEE usecases/sharding.Physical.AdjustReplicas p.BelongsToNodes after", p.BelongsToNodes)
 	return nil
 }
 
@@ -285,6 +286,7 @@ func (s *State) initPhysical(nodes []string, replFactor int64) error {
 		}
 
 		s.Physical[name] = shard
+		fmt.Println("NATEE usecases/sharding.State.initPhysical name, shard", name, shard)
 	}
 
 	return nil

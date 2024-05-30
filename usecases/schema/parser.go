@@ -288,11 +288,11 @@ func validateShardingConfig(current, update *models.Class, mtEnabled bool) error
 	if !ok {
 		return fmt.Errorf("updated config is not well-formed")
 	}
-	if first.DesiredCount != second.DesiredCount {
-		return fmt.Errorf("re-sharding not supported yet: shard count is immutable: "+
-			"attempted change from \"%d\" to \"%d\"", first.DesiredCount,
-			second.DesiredCount)
-	}
+	// if first.DesiredCount != second.DesiredCount {
+	// 	return fmt.Errorf("re-sharding not supported yet: shard count is immutable: "+
+	// 		"attempted change from \"%d\" to \"%d\"", first.DesiredCount,
+	// 		second.DesiredCount)
+	// }
 
 	if first.VirtualPerPhysical != second.VirtualPerPhysical {
 		return fmt.Errorf("virtual shards per physical is immutable: "+
