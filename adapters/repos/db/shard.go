@@ -352,24 +352,40 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		WithField("action", "downloading shard from s3 bucket").
 		Infof("shard=%s", s.name)
 
-	manager := manager.NewDownloader(s.s3client)
+	manager := manager.NewDownloader(s.s3client, func(d *manager.Downloader) {
+		d.Concurrency = 20
+		d.PartSize = 64 * 1024 * 1024 // 64MB per part
+		d.BufferProvider = manager.NewPooledBufferedWriterReadFromProvider(4096 * 4)
+	})
 
 	paginator := s3.NewListObjectsV2Paginator(s.s3client, &s3.ListObjectsV2Input{
 		Bucket: &s.bucketName,
 		Prefix: &s.name,
 	})
 
+	var wg sync.WaitGroup
+
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return err
 		}
+
 		for _, obj := range page.Contents {
-			if err := s.downloadFile(ctx, manager, s.path(), s.bucketName, aws.ToString(obj.Key)); err != nil {
-				return err
-			}
+			wg.Add(1)
+
+			go func(key string) {
+				defer wg.Done()
+
+				if err := s.downloadFile(ctx, manager, s.path(), s.bucketName, key); err != nil {
+					panic(err)
+				}
+			}(aws.ToString(obj.Key))
+
 		}
 	}
+
+	wg.Wait()
 
 	s.index.logger.
 		WithField("action", "successfully downloaded shard from s3 bucket").
@@ -1080,29 +1096,43 @@ func (s *Shard) Shutdown(ctx context.Context) error {
 		close(walker)
 	}()
 
-	uploader := manager.NewUploader(s.s3client)
+	uploader := manager.NewUploader(s.s3client, func(u *manager.Uploader) {
+		u.Concurrency = 20
+		u.PartSize = 64 * 1024 * 1024 // 64MB per part
+	})
+
+	var wg sync.WaitGroup
 
 	for path := range walker {
-		rel, err := filepath.Rel(s.path(), path)
-		if err != nil {
-			return errors.Wrap(err, "unable to get relative path")
-		}
+		wg.Add(1)
 
-		file, err := os.Open(path)
-		if err != nil {
-			return errors.Wrap(err, "failed opening file")
-		}
-		defer file.Close()
+		go func(path string) {
+			defer wg.Done()
 
-		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
-			Bucket: &s.bucketName,
-			Key:    aws.String(filepath.Join(s.name, rel)),
-			Body:   file,
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to upload")
-		}
+			rel, err := filepath.Rel(s.path(), path)
+			if err != nil {
+				panic(fmt.Errorf("%w: unable to get relative path", err))
+			}
+
+			file, err := os.Open(path)
+			if err != nil {
+				panic(fmt.Errorf("%w: failed opening file", err))
+			}
+			defer file.Close()
+
+			_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+				Bucket: &s.bucketName,
+				Key:    aws.String(filepath.Join(s.name, rel)),
+				Body:   file,
+			})
+			if err != nil {
+				panic(fmt.Errorf("%w: failed to upload", err))
+			}
+		}(path)
+
 	}
+
+	wg.Wait()
 
 	s.index.logger.
 		WithField("action", "successfully uploaded shard to s3 bucket").
