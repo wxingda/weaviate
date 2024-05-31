@@ -424,8 +424,7 @@ func (s *Server) handleShutdown(wg *sync.WaitGroup, serversPtr *[]*http.Server) 
 
 	servers := *serversPtr
 
-	ctx, cancel := context.WithTimeout(context.TODO(), s.GracefulTimeout)
-	defer cancel()
+	ctx := context.Background()
 
 	// first execute the pre-shutdown hook
 	s.api.PreServerShutdown()

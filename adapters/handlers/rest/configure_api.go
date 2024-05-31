@@ -458,8 +458,7 @@ func configureAPI(api *operations.WeaviateAPI) http.Handler {
 		// gracefully stop gRPC server
 		grpcServer.GracefulStop()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+		ctx := context.Background()
 
 		if err := appState.SchemaManager.Shutdown(ctx); err != nil {
 			panic(err)
