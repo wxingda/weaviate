@@ -53,6 +53,7 @@ type flat struct {
 	trackDimensionsOnce sync.Once
 	rescore             int64
 	bq                  compressionhelpers.BinaryQuantizer
+	pq                  *compressionhelpers.ScalarQuantizer
 
 	pqResults *common.PqMaxPool
 	pool      *pools
@@ -60,6 +61,7 @@ type flat struct {
 	compression string
 	bqCache     cache.Cache[uint64]
 	count       uint64
+	pqCache     cache.Cache[byte]
 }
 
 type distanceCalc func(vecAsBytes []byte) (float32, error)
@@ -105,6 +107,11 @@ func (flat *flat) getBQVector(ctx context.Context, id uint64) ([]uint64, error) 
 		return nil, err
 	}
 	return uint64SliceFromByteSlice(bytes, make([]uint64, len(bytes)/8)), nil
+}
+
+func (flat *flat) getPQVector(ctx context.Context, id uint64) ([]byte, error) {
+	flat.logger.Error(id)
+	return nil, errors.Errorf("not found")
 }
 
 func extractCompression(uc flatent.UserConfig) string {
@@ -345,24 +352,18 @@ func (index *flat) createDistanceCalc(vector []float32) distanceCalc {
 }
 
 func (index *flat) searchByVectorBQ(vector []float32, k int, allow helpers.AllowList) ([]uint64, []float32, error) {
-	rescore := index.searchTimeRescore(k)
+	rescore := k //index.searchTimeRescore(k)
 	heap := index.pqResults.GetMax(rescore)
 	defer index.pqResults.Put(heap)
 
 	vector = index.normalized(vector)
-	vectorBQ := index.bq.Encode(vector)
 
 	if index.isBQCached() {
-		if err := index.findTopVectorsCached(heap, allow, rescore, vectorBQ); err != nil {
+		if err := index.findTopVectorsCachedPQ(heap, allow, rescore, vector); err != nil {
 			return nil, nil, err
 		}
 	} else {
-		if err := index.findTopVectors(heap, allow, rescore,
-			index.store.Bucket(index.getCompressedBucketName()).Cursor,
-			index.createDistanceCalcBQ(vectorBQ),
-		); err != nil {
-			return nil, nil, err
-		}
+		panic("wow")
 	}
 
 	distanceCalc := index.createDistanceCalc(vector)
@@ -489,6 +490,49 @@ func (index *flat) findTopVectorsCached(heap *priorityqueue.Queue[any],
 				return err
 			}
 			index.insertToHeap(heap, limit, id, distance)
+		}
+	}
+	return nil
+}
+
+func (index *flat) findTopVectorsCachedPQ(heap *priorityqueue.Queue[any],
+	allow helpers.AllowList, limit int, vector []float32,
+) error {
+	var id uint64
+	allowMax := uint64(0)
+
+	if allow != nil {
+		// nothing allowed, skip search
+		if allow.IsEmpty() {
+			return nil
+		}
+
+		allowMax = allow.Max()
+
+		id = allow.Min()
+	} else {
+		id = 0
+	}
+	all := 100000
+
+	// since keys are sorted, once key/id get greater than max allowed one
+	// further search can be stopped
+	if index.pqCache != nil {
+		for ; id < uint64(all) && (allow == nil || id <= allowMax); id++ {
+			if allow == nil || allow.Contains(id) {
+				vec, err := index.pqCache.Get(context.Background(), id)
+				if err != nil {
+					return err
+				}
+				if len(vec) == 0 {
+					continue
+				}
+				distance, err := index.pq.DistanceBetweenCompressedAndUncompressedVectors(vector, vec)
+				if err != nil {
+					return err
+				}
+				index.insertToHeap(heap, limit, id, distance)
+			}
 		}
 	}
 	return nil

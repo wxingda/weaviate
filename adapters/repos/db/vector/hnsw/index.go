@@ -276,6 +276,7 @@ func New(cfg Config, uc ent.UserConfig, tombstoneCallbacks, shardCompactionCallb
 		shardCompactionCallbacks: shardCompactionCallbacks,
 		shardFlushCallbacks:      shardFlushCallbacks,
 		store:                    store,
+		doNotRescore:             true,
 		allocChecker:             cfg.AllocChecker,
 	}
 
