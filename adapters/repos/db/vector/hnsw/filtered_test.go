@@ -1,17 +1,23 @@
-package compressionhelpers
+package hnsw
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/weaviate/hdf5"
-	"github.com/weaviate/weaviate/adapters/repos/db/priorityqueue"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/compressionhelpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/testinghelpers"
+	"github.com/weaviate/weaviate/entities/cyclemanager"
+	ent "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
 )
 
 func getHDF5ByteSize(dataset *hdf5.Dataset) uint {
@@ -193,63 +199,111 @@ func train(file *hdf5.File) ([][]float32, error) {
 }
 
 func Test_Encoders(t *testing.T) {
-	path := "/Users/abdel/Documents/datasets/dbpedia-100k-openai-ada002.hdf5"
+	filterRate := 0.05
+	path := "/Users/abdel/Documents/datasets/dbpedia-openai-1000k-angular.hdf5"
 	file, err := hdf5.OpenFile(path, hdf5.F_ACC_RDONLY)
 	assert.Nil(t, err)
 	defer file.Close()
-	data, err := train(file)
+	data, _ := train(file)
 	neighbors := loadHdf5Neighbors(file, "neighbors")
 	testData := loadHdf5Float32(file, "test")
 	fmt.Println(len(data[0]))
-
-	compressed := make([][]byte, len(data))
+	labels := make([][]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		if rand.Float64() < filterRate {
+			labels[i] = []byte{0, 1}
+		} else {
+			labels[i] = []byte{0}
+		}
+	}
 
 	logger := logrus.New()
-	distancer := distancer.NewDotProductProvider()
-	quantizer := NewScalarQuantizer(data, distancer)
+	fmt.Printf("importing into hnsw\n")
 
-	Concurrently(logger, uint64(len(data)), func(i uint64) {
-		compressed[i] = quantizer.Encode(data[i])
+	efConstruction := 256
+	ef := []int{16, 32, 64, 128, 256, 512}
+	maxNeighbors := 24
+
+	uc := ent.UserConfig{
+		MaxConnections: maxNeighbors,
+		EFConstruction: efConstruction,
+		EF:             ef[0],
+	}
+
+	index, err := New(Config{
+		RootPath:              "doesnt-matter-as-committlogger-is-mocked-out",
+		ID:                    "recallbenchmark",
+		MakeCommitLoggerThunk: MakeNoopCommitLogger,
+		DistanceProvider:      distancer.NewCosineDistanceProvider(),
+		VectorForIDThunk: func(ctx context.Context, id uint64) ([]float32, error) {
+			return data[int(id)], nil
+		},
+	}, uc, cyclemanager.NewCallbackGroupNoop(), cyclemanager.NewCallbackGroupNoop(), cyclemanager.NewCallbackGroupNoop(), testinghelpers.NewDummyStore(t))
+	require.Nil(t, err)
+
+	before := time.Now()
+	compressionhelpers.Concurrently(logger, uint64(len(data)), func(i uint64) {
+		if len(labels[i]) == 2 {
+			err := index.Add(uint64(i), data[i])
+			require.Nil(t, err)
+		}
 	})
+	fmt.Printf("importing took %s\n", time.Since(before))
+
 	k := 10
 
-	var relevant uint64
 	mutex := sync.Mutex{}
-	ellapsed := time.Duration(0)
-	Concurrently(logger, uint64(len(testData)), func(i uint64) {
-		heap := priorityqueue.NewMax[any](k)
-		//cd := quantizer.NewDistancer(testData[i])
-		cq := quantizer.Encode(testData[i])
-		for j := range compressed {
+	for _, currEf := range ef {
+		var relevant uint64
+		var total int
+		uc.EF = currEf
+		index.UpdateUserConfig(uc, func() {})
+		ellapsed := time.Duration(0)
+		compressionhelpers.Concurrently(logger, uint64(len(testData)), func(i uint64) {
 			before := time.Now()
-			//d, _, _ := cd.Distance(compressed[j])
-			//d, _ := quantizer.DistanceBetweenCompressedAndUncompressedVectors(testData[i], compressed[j])
-			d, _ := quantizer.DistanceBetweenCompressedVectors(cq, compressed[j])
-			//d, _, _ := distancer.SingleDist(testData[i], data[j])
+			results, _, _ := index.SearchByVector(testData[i], k, nil)
 			ell := time.Since(before)
+			filteredNeighbors := make([]uint64, 0, k)
+			j := 0
+			for curr := 0; curr < len(neighbors[i]); curr++ {
+				if len(labels[neighbors[i][curr]]) == 2 {
+					filteredNeighbors = append(filteredNeighbors, neighbors[i][curr])
+					j++
+					if j == k {
+						break
+					}
+				}
+			}
+			hits := MatchesInLists(filteredNeighbors, results)
+			//hits := MatchesInLists(neighbors[i][:k], results)
 			mutex.Lock()
+			relevant += hits
+			total += len(filteredNeighbors)
 			ellapsed += ell
 			mutex.Unlock()
-			if heap.Len() < k || heap.Top().Dist > d {
-				if heap.Len() == k {
-					heap.Pop()
-				}
-				heap.Insert(uint64(j), d)
-			}
-		}
-		results := make([]uint64, 0, k)
-		for heap.Len() > 0 {
-			results = append(results, heap.Pop().ID)
-		}
-		hits := MatchesInLists(neighbors[i][:k], results)
-		mutex.Lock()
-		relevant += hits
-		mutex.Unlock()
-	})
+		})
 
-	recall := float32(relevant) / float32(k*len(testData))
-	latency := float32(ellapsed.Milliseconds()) / float32(len(testData))
-	fmt.Println(recall)
-	fmt.Println(latency)
-	assert.NotNil(t, err)
+		recall := float32(relevant) / float32(total)
+		latency := float32(ellapsed.Milliseconds()) / float32(len(testData))
+		fmt.Print("ef: ", currEf, " -> ")
+		fmt.Println(recall, latency, float32(total)/float32(len(testData)))
+	}
+	assert.Nil(t, index)
+}
+
+func MatchesInLists(control []uint64, results []uint64) uint64 {
+	desired := map[uint64]struct{}{}
+	for _, relevant := range control {
+		desired[relevant] = struct{}{}
+	}
+
+	var matches uint64
+	for _, candidate := range results {
+		_, ok := desired[candidate]
+		if ok {
+			matches++
+		}
+	}
+
+	return matches
 }

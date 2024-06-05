@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -62,6 +63,10 @@ func (h *hnsw) autoEfFromK(k int) int {
 }
 
 func (h *hnsw) SearchByVector(vector []float32, k int, allowList helpers.AllowList) ([]uint64, []float32, error) {
+	return h.SearchByVectorFiltered(vector, k, allowList, 0)
+}
+
+func (h *hnsw) SearchByVectorFiltered(vector []float32, k int, allowList helpers.AllowList, label byte) ([]uint64, []float32, error) {
 	h.compressActionLock.RLock()
 	defer h.compressActionLock.RUnlock()
 
@@ -70,7 +75,7 @@ func (h *hnsw) SearchByVector(vector []float32, k int, allowList helpers.AllowLi
 	if allowList != nil && !h.forbidFlat && allowList.Len() < flatSearchCutoff {
 		return h.flatSearch(vector, k, allowList)
 	}
-	return h.knnSearchByVector(vector, k, h.searchTimeEF(k), allowList)
+	return h.knnSearchByVectorFiltered(vector, k, h.searchTimeEF(k), allowList, label)
 }
 
 // SearchByVectorDistance wraps SearchByVector, and calls it recursively until
@@ -161,18 +166,33 @@ func (h *hnsw) searchLayerByVector(queryVector []float32,
 	allowList helpers.AllowList,
 ) (*priorityqueue.Queue[any], error,
 ) {
+	return h.searchLayerByVectorFiltered(queryVector, entrypoints, ef, level, allowList, 0)
+}
+
+func (h *hnsw) searchLayerByVectorFiltered(queryVector []float32,
+	entrypoints *priorityqueue.Queue[any], ef int, level int,
+	allowList helpers.AllowList, label byte,
+) (*priorityqueue.Queue[any], error,
+) {
 	var compressorDistancer compressionhelpers.CompressorDistancer
 	if h.compressed.Load() {
 		var returnFn compressionhelpers.ReturnDistancerFn
 		compressorDistancer, returnFn = h.compressor.NewDistancer(queryVector)
 		defer returnFn()
 	}
-	return h.searchLayerByVectorWithDistancer(queryVector, entrypoints, ef, level, allowList, compressorDistancer)
+	return h.searchLayerByVectorWithDistancerFiltered(queryVector, entrypoints, ef, level, allowList, compressorDistancer, label)
 }
 
 func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 	entrypoints *priorityqueue.Queue[any], ef int, level int,
 	allowList helpers.AllowList, compressorDistancer compressionhelpers.CompressorDistancer) (*priorityqueue.Queue[any], error,
+) {
+	return h.searchLayerByVectorWithDistancerFiltered(queryVector, entrypoints, ef, level, allowList, compressorDistancer, 0)
+}
+
+func (h *hnsw) searchLayerByVectorWithDistancerFiltered(queryVector []float32,
+	entrypoints *priorityqueue.Queue[any], ef int, level int,
+	allowList helpers.AllowList, compressorDistancer compressionhelpers.CompressorDistancer, label byte) (*priorityqueue.Queue[any], error,
 ) {
 	h.pools.visitedListsLock.RLock()
 	visited := h.pools.visitedLists.Borrow()
@@ -296,6 +316,9 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			}
 
 			if distance < worstResultDistance || results.Len() < ef {
+				if level == 0 && !slices.Contains(h.nodes[neighborID].labels, label) {
+					continue
+				}
 				candidates.Insert(neighborID, distance)
 				if level == 0 && allowList != nil {
 					// we are on the lowest level containing the actual candidates and we
@@ -479,6 +502,12 @@ func (h *hnsw) handleDeletedNode(docID uint64) {
 func (h *hnsw) knnSearchByVector(searchVec []float32, k int,
 	ef int, allowList helpers.AllowList,
 ) ([]uint64, []float32, error) {
+	return h.knnSearchByVector(searchVec, k, ef, allowList)
+}
+
+func (h *hnsw) knnSearchByVectorFiltered(searchVec []float32, k int,
+	ef int, allowList helpers.AllowList, label byte,
+) ([]uint64, []float32, error) {
 	if h.isEmpty() {
 		return nil, nil, nil
 	}
@@ -518,7 +547,7 @@ func (h *hnsw) knnSearchByVector(searchVec []float32, k int,
 		eps := priorityqueue.NewMin[any](10)
 		eps.Insert(entryPointID, entryPointDistance)
 
-		res, err := h.searchLayerByVectorWithDistancer(searchVec, eps, 1, level, nil, compressorDistancer)
+		res, err := h.searchLayerByVectorWithDistancerFiltered(searchVec, eps, 1, level, nil, compressorDistancer, label)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "knn search: search layer at level %d", level)
 		}
@@ -561,7 +590,7 @@ func (h *hnsw) knnSearchByVector(searchVec []float32, k int,
 
 	eps := priorityqueue.NewMin[any](10)
 	eps.Insert(entryPointID, entryPointDistance)
-	res, err := h.searchLayerByVectorWithDistancer(searchVec, eps, ef, 0, allowList, compressorDistancer)
+	res, err := h.searchLayerByVectorWithDistancerFiltered(searchVec, eps, ef, 0, allowList, compressorDistancer, label)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "knn search: search layer at level %d", 0)
 	}

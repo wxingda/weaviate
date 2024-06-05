@@ -41,6 +41,10 @@ func (h *hnsw) ValidateBeforeInsert(vector []float32) error {
 }
 
 func (h *hnsw) AddBatch(ctx context.Context, ids []uint64, vectors [][]float32) error {
+	return h.AddBatchFiltered(ctx, ids, vectors, []byte{})
+}
+
+func (h *hnsw) AddBatchFiltered(ctx context.Context, ids []uint64, vectors [][]float32, labels []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -95,7 +99,7 @@ func (h *hnsw) AddBatch(ctx context.Context, ids []uint64, vectors [][]float32) 
 		h.metrics.InsertVector()
 
 		vector = h.normalizeVec(vector)
-		err := h.addOne(vector, node)
+		err := h.addOne(vector, node, labels)
 		if err != nil {
 			return err
 		}
@@ -105,7 +109,7 @@ func (h *hnsw) AddBatch(ctx context.Context, ids []uint64, vectors [][]float32) 
 	return nil
 }
 
-func (h *hnsw) addOne(vector []float32, node *vertex) error {
+func (h *hnsw) addOne(vector []float32, node *vertex, labels []byte) error {
 	h.compressActionLock.RLock()
 	h.deleteVsInsertLock.RLock()
 
@@ -144,6 +148,7 @@ func (h *hnsw) addOne(vector []float32, node *vertex) error {
 	h.RUnlock()
 
 	targetLevel := node.level
+	node.labels = labels
 	node.connections = make([][]uint64, targetLevel+1)
 
 	for i := targetLevel; i >= 0; i-- {
@@ -192,7 +197,7 @@ func (h *hnsw) addOne(vector []float32, node *vertex) error {
 
 	// TODO: check findAndConnectNeighbors...
 	if err := h.findAndConnectNeighbors(node, entryPointID, vector, distancer,
-		targetLevel, currentMaximumLayer, helpers.NewAllowList()); err != nil {
+		targetLevel, currentMaximumLayer, helpers.NewAllowList(), labels); err != nil {
 		return errors.Wrap(err, "find and connect neighbors")
 	}
 
@@ -223,8 +228,12 @@ func (h *hnsw) addOne(vector []float32, node *vertex) error {
 	return nil
 }
 
+func (h *hnsw) AddFiltered(id uint64, vector []float32, labels []byte) error {
+	return h.AddBatchFiltered(context.TODO(), []uint64{id}, [][]float32{vector}, labels)
+}
+
 func (h *hnsw) Add(id uint64, vector []float32) error {
-	return h.AddBatch(context.TODO(), []uint64{id}, [][]float32{vector})
+	return h.AddFiltered(id, vector, []byte{})
 }
 
 func (h *hnsw) insertInitialElement(node *vertex, nodeVec []float32) error {

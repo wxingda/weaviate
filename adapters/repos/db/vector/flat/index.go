@@ -53,7 +53,7 @@ type flat struct {
 	trackDimensionsOnce sync.Once
 	rescore             int64
 	bq                  compressionhelpers.BinaryQuantizer
-	pq                  *compressionhelpers.ScalarQuantizer
+	pq                  *compressionhelpers.ProductQuantizer
 
 	pqResults *common.PqMaxPool
 	pool      *pools

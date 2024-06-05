@@ -21,6 +21,7 @@ type vertex struct {
 	level       int
 	connections [][]uint64
 	maintenance bool
+	labels      []byte
 }
 
 func (v *vertex) markAsMaintenance() {

@@ -27,10 +27,10 @@ import (
 
 func (h *hnsw) findAndConnectNeighbors(node *vertex,
 	entryPointID uint64, nodeVec []float32, distancer compressionhelpers.CompressorDistancer, targetLevel, currentMaxLevel int,
-	denyList helpers.AllowList,
+	denyList helpers.AllowList, labels []byte,
 ) error {
 	nfc := newNeighborFinderConnector(h, node, entryPointID, nodeVec, distancer, targetLevel,
-		currentMaxLevel, denyList, false)
+		currentMaxLevel, denyList, false, labels)
 
 	return nfc.Do()
 }
@@ -40,7 +40,7 @@ func (h *hnsw) reconnectNeighboursOf(node *vertex,
 	denyList helpers.AllowList,
 ) error {
 	nfc := newNeighborFinderConnector(h, node, entryPointID, nodeVec, distancer, targetLevel,
-		currentMaxLevel, denyList, true)
+		currentMaxLevel, denyList, true, []byte{})
 
 	return nfc.Do()
 }
@@ -58,11 +58,12 @@ type neighborFinderConnector struct {
 	denyList        helpers.AllowList
 	// bufLinksLog     BufferedLinksLogger
 	tombstoneCleanupNodes bool
+	labels                []byte
 }
 
 func newNeighborFinderConnector(graph *hnsw, node *vertex, entryPointID uint64,
 	nodeVec []float32, distancer compressionhelpers.CompressorDistancer, targetLevel, currentMaxLevel int,
-	denyList helpers.AllowList, tombstoneCleanupNodes bool,
+	denyList helpers.AllowList, tombstoneCleanupNodes bool, labels []byte,
 ) *neighborFinderConnector {
 	return &neighborFinderConnector{
 		ctx:                   graph.shutdownCtx,
@@ -75,6 +76,7 @@ func newNeighborFinderConnector(graph *hnsw, node *vertex, entryPointID uint64,
 		currentMaxLevel:       currentMaxLevel,
 		denyList:              denyList,
 		tombstoneCleanupNodes: tombstoneCleanupNodes,
+		labels:                labels,
 	}
 }
 
@@ -248,7 +250,7 @@ func (n *neighborFinderConnector) doAtLevel(level int) error {
 		before = time.Now()
 	}
 
-	if err := n.graph.selectNeighborsHeuristic(results, maxConnections-total, n.denyList); err != nil {
+	if err := n.graph.selectNeighborsHeuristic(results, maxConnections-total, n.denyList, n.labels); err != nil {
 		return errors.Wrap(err, "heuristic")
 	}
 
@@ -349,7 +351,7 @@ func (n *neighborFinderConnector) connectNeighborAtLevel(neighborID uint64,
 			candidates.Insert(existingConnection, dist)
 		}
 
-		err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList)
+		err = n.graph.selectNeighborsHeuristic(candidates, maximumConnections, n.denyList, n.labels)
 		if err != nil {
 			return errors.Wrap(err, "connect neighbors")
 		}

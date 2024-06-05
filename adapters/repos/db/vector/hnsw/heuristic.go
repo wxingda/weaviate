@@ -18,10 +18,11 @@ import (
 	"github.com/weaviate/weaviate/adapters/repos/db/helpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/priorityqueue"
 	"github.com/weaviate/weaviate/entities/storobj"
+	"golang.org/x/exp/slices"
 )
 
 func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
-	max int, denyList helpers.AllowList,
+	max int, denyList helpers.AllowList, labels []byte,
 ) error {
 	if input.Len() < max {
 		return nil
@@ -65,7 +66,7 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 					return err
 				}
 
-				if peerDist < distToQuery {
+				if peerDist < distToQuery && containsAll(h.nodes[item.ID].labels, h.nodes[curr.ID].labels) {
 					good = false
 					break
 				}
@@ -81,10 +82,18 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 		vecs, errs := h.multiVectorForID(context.TODO(), ids)
 
 		returnList = h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
+		sum0 := 0
+		sum1 := 1
 
 		for closestFirst.Len() > 0 && len(returnList) < max {
 			curr := closestFirst.Pop()
 			if denyList != nil && denyList.Contains(curr.ID) {
+				continue
+			}
+			if sum0 >= max/2 && len(h.nodes[curr.ID].labels) == 1 {
+				continue
+			}
+			if sum1 >= max/2 && len(h.nodes[curr.ID].labels) == 2 {
 				continue
 			}
 			distToQuery := curr.Dist
@@ -106,13 +115,17 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 				peerDist, _, _ := h.distancerProvider.SingleDist(currVec,
 					vecs[item.Value])
 
-				if peerDist < distToQuery {
+				if peerDist < distToQuery && containsAll(h.nodes[item.ID].labels, h.nodes[curr.ID].labels) {
 					good = false
 					break
 				}
 			}
 
 			if good {
+				sum0++
+				if len(h.nodes[curr.ID].labels) == 2 {
+					sum1++
+				}
 				returnList = append(returnList, curr)
 			}
 
@@ -132,4 +145,13 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 	h.pools.pqItemSlice.Put(returnList)
 
 	return nil
+}
+
+func containsAll(all, part []byte) bool {
+	for _, x := range part {
+		if !slices.Contains(all, x) {
+			return false
+		}
+	}
+	return true
 }

@@ -310,7 +310,7 @@ func NewSQCompressor(
 	data [][]float32,
 	store *lsmkv.Store,
 ) (VectorCompressor, error) {
-	quantizer := NewLocallyAdaptiveScalarQuantizer(data, distance)
+	/*quantizer := NewLocallyAdaptiveScalarQuantizer(data, distance)
 	sqVectorsCompressor := &quantizedVectorsCompressor[byte]{
 		quantizer:       quantizer,
 		compressedStore: store,
@@ -319,8 +319,8 @@ func NewSQCompressor(
 	}
 	sqVectorsCompressor.initCompressedStore()
 	sqVectorsCompressor.cache = cache.NewShardedByteLockCache(sqVectorsCompressor.getCompressedVectorForID, vectorCacheMaxObjects, logger, 0, nil)
-	sqVectorsCompressor.cache.Grow(uint64(len(data)))
-	return sqVectorsCompressor, nil
+	sqVectorsCompressor.cache.Grow(uint64(len(data)))*/
+	return nil, nil
 }
 
 type quantizedCompressorDistancer[T byte | uint64] struct {
