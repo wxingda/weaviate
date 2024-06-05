@@ -239,7 +239,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
 			copy(connectionsReusable, candidateNode.connections[level])
 		} else {
-			slice := h.pools.tempVectorsUint64.Get(10 * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero)
+			slice := h.pools.tempVectorsUint64.Get(10 * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero)
 			defer h.pools.tempVectorsUint64.Put(slice)
 			connectionsReusable = slice.Slice
 
@@ -253,6 +253,11 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				nodeId := candidateNode.connections[level][index]
 				index++
 
+				if allowList.Contains(nodeId) {
+					h.logger.Error("hit")
+				} else {
+					h.logger.Error("miss")
+				}
 				if !visitedExp.Visited(nodeId) && !visited.Visited(nodeId) && allowList.Contains(nodeId) {
 					visitedExp.Visit(nodeId)
 					connectionsReusable[realLen] = nodeId
@@ -270,8 +275,34 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 					visitedExp.Visit(expId)
 
 					if allowList.Contains(expId) {
+						h.logger.Error("hit")
+					} else {
+						h.logger.Error("miss")
+					}
+					if allowList.Contains(expId) {
 						connectionsReusable[realLen] = expId
 						realLen++
+					}
+
+					node2 := h.nodes[nodeId]
+					if node2 == nil {
+						continue
+					}
+					for _, expId2 := range node2.connections[level] {
+						if visitedExp.Visited(expId2) || visited.Visited(expId2) {
+							continue
+						}
+						visitedExp.Visit(expId2)
+
+						if allowList.Contains(expId2) {
+							h.logger.Error("hit")
+						} else {
+							h.logger.Error("miss")
+						}
+						if allowList.Contains(expId2) {
+							connectionsReusable[realLen] = expId2
+							realLen++
+						}
 					}
 				}
 			}
@@ -324,7 +355,10 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 					// filter restricting this search further. As a result we have to
 					// ignore items not on the list
 					if !allowList.Contains(neighborID) {
+						h.logger.Error("miss")
 						continue
+					} else {
+						h.logger.Error("hit")
 					}
 				}
 				if h.hasTombstone(neighborID) {
@@ -530,7 +564,7 @@ func (h *hnsw) knnSearchByVector(searchVec []float32, k int,
 		defer returnFn()
 	}
 	// stop at layer 1, not 0!
-	for level := maxLayer; level >= 1; level-- {
+	for level := maxLayer; level >= 0; level-- {
 		eps := priorityqueue.NewMin[any](10)
 		eps.Insert(entryPointID, entryPointDistance)
 
