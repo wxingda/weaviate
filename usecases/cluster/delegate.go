@@ -62,6 +62,7 @@ type DiskUsage struct {
 	Available uint64
 }
 
+// this is the place where i think we want to store "load params for nodes"
 // NodeInfo disk space
 type NodeInfo struct {
 	DiskUsage
@@ -151,6 +152,7 @@ func (d *delegate) init(diskSpace func(path string) (DiskUsage, error)) error {
 	d.set(d.Name, NodeInfo{space, lastTime.UnixMilli()}) // cache
 
 	// delegate remains alive throughout the entire program.
+	// This is where the updater is called to keep track of disk space
 	enterrors.GoWrapper(func() { d.updater(_ProtoTTL, minUpdatePeriod, diskSpace) }, d.log)
 	return nil
 }
@@ -253,6 +255,7 @@ func (d *delegate) sortCandidates(names []string) []string {
 	d.Lock()
 	defer d.Unlock()
 	m := d.Cache
+	fmt.Println("NATEE usecases/cluster.delegate a", m[names[0]])
 	sort.Slice(names, func(i, j int) bool {
 		return (m[names[j]].Available >> 25) < (m[names[i]].Available >> 25)
 	})
@@ -270,6 +273,7 @@ func (d *delegate) updater(period, minPeriod time.Duration, du func(path string)
 			continue // wait for next cycle to avoid overwhelming the disk
 		}
 		space, err := du(d.dataPath)
+		fmt.Println("NATEE usecases/cluster.delegate.updater space", space)
 		if err != nil {
 			d.log.WithField("action", "delegate.local_state.disk_usage").WithError(err).
 				Error("disk space updater failed")

@@ -196,7 +196,11 @@ func (s *State) StorageNodes() []string {
 // Candidates returns list of nodes (names) sorted by the
 // free amount of disk space in descending order
 func (s *State) Candidates() []string {
-	return s.delegate.sortCandidates(s.StorageNodes())
+	sn := s.StorageNodes()
+	fmt.Println("NATEE usecases/cluster.State.Candidates sn", sn)
+	ss := s.delegate.sortCandidates(sn)
+	fmt.Println("NATEE usecases/cluster.State.Candidates ss", ss)
+	return ss
 }
 
 // All node names (not their hostnames!) for live members, including self.
