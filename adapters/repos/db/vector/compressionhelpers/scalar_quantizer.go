@@ -95,7 +95,7 @@ func (sq *ScalarQuantizer) DistanceBetweenCompressedVectors(x, y []byte) (float3
 func (sq *ScalarQuantizer) DistanceBetweenCompressedAndUncompressedVectors2(x []float32, encoded []byte, normX, normX2 float32) (float32, error) {
 	switch sq.distancer.Type() {
 	case "l2-squared":
-		return normX2
+		return normX2, nil
 	case "dot":
 		return -(sq.a/codes*float32(dotFloatByteImpl(x, encoded[:len(encoded)-4])) + sq.b*normX), nil
 	}
