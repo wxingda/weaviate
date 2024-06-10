@@ -90,11 +90,13 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 			if denyList != nil && denyList.Contains(curr.ID) {
 				continue
 			}
-			if sum0 >= max/2 && len(h.nodes[curr.ID].labels) == 1 {
-				continue
-			}
-			if sum1 >= max/2 && len(h.nodes[curr.ID].labels) == 2 {
-				continue
+			if len(labels) == 2 {
+				if sum0 >= max/2 && len(h.nodes[curr.ID].labels) == 1 {
+					continue
+				}
+				if sum1 >= max/2 && len(h.nodes[curr.ID].labels) == 2 {
+					continue
+				}
 			}
 			distToQuery := curr.Dist
 

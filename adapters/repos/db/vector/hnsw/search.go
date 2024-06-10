@@ -316,11 +316,11 @@ func (h *hnsw) searchLayerByVectorWithDistancerFiltered(queryVector []float32,
 			}
 
 			if distance < worstResultDistance || results.Len() < ef {
-				if level == 0 && !slices.Contains(h.nodes[neighborID].labels, label) {
+				if !slices.Contains(h.nodes[neighborID].labels, label) {
 					continue
 				}
 				candidates.Insert(neighborID, distance)
-				if level == 0 && allowList != nil {
+				if allowList != nil {
 					// we are on the lowest level containing the actual candidates and we
 					// have an allow list (i.e. the user has probably set some sort of a
 					// filter restricting this search further. As a result we have to

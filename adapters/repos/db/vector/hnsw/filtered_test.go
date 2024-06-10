@@ -200,7 +200,7 @@ func train(file *hdf5.File) ([][]float32, error) {
 
 func Test_Encoders(t *testing.T) {
 	filterRate := 0.05
-	path := "/Users/abdel/Documents/datasets/dbpedia-openai-1000k-angular.hdf5"
+	path := "/Users/abdel/Documents/datasets/dbpedia-100k-openai-ada002.hdf5"
 	file, err := hdf5.OpenFile(path, hdf5.F_ACC_RDONLY)
 	assert.Nil(t, err)
 	defer file.Close()
@@ -243,10 +243,8 @@ func Test_Encoders(t *testing.T) {
 
 	before := time.Now()
 	compressionhelpers.Concurrently(logger, uint64(len(data)), func(i uint64) {
-		if len(labels[i]) == 2 {
-			err := index.Add(uint64(i), data[i])
-			require.Nil(t, err)
-		}
+		err := index.AddFiltered(uint64(i), data[i], labels[i])
+		require.Nil(t, err)
 	})
 	fmt.Printf("importing took %s\n", time.Since(before))
 
@@ -261,7 +259,7 @@ func Test_Encoders(t *testing.T) {
 		ellapsed := time.Duration(0)
 		compressionhelpers.Concurrently(logger, uint64(len(testData)), func(i uint64) {
 			before := time.Now()
-			results, _, _ := index.SearchByVector(testData[i], k, nil)
+			results, _, _ := index.SearchByVectorFiltered(testData[i], k, nil, 1)
 			ell := time.Since(before)
 			filteredNeighbors := make([]uint64, 0, k)
 			j := 0
