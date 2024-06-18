@@ -58,8 +58,6 @@ func (v *vectorizer) Vectorize(ctx context.Context,
 		return nil, errors.Wrap(err, "create POST request")
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-
 	res, err := v.httpClient.Do(req)
 	if err != nil {
 		return nil, errors.Wrap(err, "send POST request")
@@ -95,8 +93,8 @@ func (v *vectorizer) url(path string, inferenceURL string) string {
 }
 
 type vecRequest struct {
-	Texts  []string `json:"texts,omitempty"`
-	Images []string `json:"images,omitempty"`
+	Texts  []string `json:"texts"`
+	Images []string `json:"images"`
 }
 
 type vecResponse struct {
