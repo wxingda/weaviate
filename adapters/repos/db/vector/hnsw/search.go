@@ -27,6 +27,8 @@ import (
 	"github.com/weaviate/weaviate/usecases/floatcomp"
 )
 
+const M = 20
+
 func (h *hnsw) searchTimeEF(k int) int {
 	// load atomically, so we can get away with concurrent updates of the
 	// userconfig without having to set a lock each time we try to read - which
@@ -66,10 +68,10 @@ func (h *hnsw) SearchByVector(vector []float32, k int, allowList helpers.AllowLi
 	defer h.compressActionLock.RUnlock()
 
 	vector = h.normalizeVec(vector)
-	flatSearchCutoff := int(atomic.LoadInt64(&h.flatSearchCutoff))
+	/*flatSearchCutoff := int(atomic.LoadInt64(&h.flatSearchCutoff))
 	if allowList != nil && !h.forbidFlat && allowList.Len() < flatSearchCutoff {
 		return h.flatSearch(vector, k, allowList)
-	}
+	}*/
 	return h.knnSearchByVector(vector, k, h.searchTimeEF(k), allowList)
 }
 
@@ -176,6 +178,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 ) {
 	h.pools.visitedListsLock.RLock()
 	visited := h.pools.visitedLists.Borrow()
+	visitedExp := h.pools.visitedLists.Borrow()
 	h.pools.visitedListsLock.RUnlock()
 
 	candidates := h.pools.pqCandidates.GetMin(ef)
@@ -239,89 +242,57 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 			connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
 			copy(connectionsReusable, candidateNode.connections[level])
 		} else {
-			slice := h.pools.tempVectorsUint64.Get(10 * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero * h.maximumConnectionsLayerZero)
+			slice := h.pools.tempVectorsUint64.Get(M * h.maximumConnectionsLayerZero)
 			defer h.pools.tempVectorsUint64.Put(slice)
 			connectionsReusable = slice.Slice
 
 			realLen := 0
 			index := 0
-			h.pools.visitedListsLock.RLock()
-			visitedExp := h.pools.visitedLists.Borrow()
-			h.pools.visitedListsLock.RUnlock()
 
-			for index < len(candidateNode.connections[level]) {
+			for index < len(candidateNode.connections[level]) && realLen < M*h.maximumConnectionsLayerZero {
 				nodeId := candidateNode.connections[level][index]
 				index++
-
-				if allowList.Contains(nodeId) {
-					h.logger.Error("hit")
-				} else {
-					h.logger.Error("miss")
+				if !visitedExp.Visited(nodeId) {
+					if allowList.Contains(nodeId) {
+						connectionsReusable[realLen] = nodeId
+						realLen++
+					}
 				}
-				if !visitedExp.Visited(nodeId) && !visited.Visited(nodeId) && allowList.Contains(nodeId) {
-					visitedExp.Visit(nodeId)
-					connectionsReusable[realLen] = nodeId
-					realLen++
-				}
+				visitedExp.Visit(nodeId)
 
 				node := h.nodes[nodeId]
 				if node == nil {
 					continue
 				}
 				for _, expId := range node.connections[level] {
-					if visitedExp.Visited(expId) || visited.Visited(expId) {
+					if realLen >= M*h.maximumConnectionsLayerZero {
+						break
+					}
+					if visitedExp.Visited(expId) {
 						continue
 					}
 					visitedExp.Visit(expId)
 
 					if allowList.Contains(expId) {
-						h.logger.Error("hit")
-					} else {
-						h.logger.Error("miss")
-					}
-					if allowList.Contains(expId) {
 						connectionsReusable[realLen] = expId
 						realLen++
-					}
-
-					node2 := h.nodes[nodeId]
-					if node2 == nil {
-						continue
-					}
-					for _, expId2 := range node2.connections[level] {
-						if visitedExp.Visited(expId2) || visited.Visited(expId2) {
-							continue
-						}
-						visitedExp.Visit(expId2)
-
-						if allowList.Contains(expId2) {
-							h.logger.Error("hit")
-						} else {
-							h.logger.Error("miss")
-						}
-						if allowList.Contains(expId2) {
-							connectionsReusable[realLen] = expId2
-							realLen++
-						}
 					}
 				}
 			}
 			connectionsReusable = connectionsReusable[:realLen]
-			h.pools.visitedListsLock.RLock()
-			h.pools.visitedLists.Return(visitedExp)
-			h.pools.visitedListsLock.RUnlock()
 		}
 		candidateNode.Unlock()
 
 		for _, neighborID := range connectionsReusable {
-
 			if ok := visited.Visited(neighborID); ok {
 				// skip if we've already visited this neighbor
 				continue
 			}
 			// make sure we never visit this neighbor again
 			visited.Visit(neighborID)
-
+			/*if allowList != nil && !allowList.Contains(neighborID) {
+				continue
+			}*/
 			var distance float32
 			var ok bool
 			var err error
@@ -349,18 +320,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 			if distance < worstResultDistance || results.Len() < ef {
 				candidates.Insert(neighborID, distance)
-				if level == 0 && !h.acornSearch && allowList != nil {
-					// we are on the lowest level containing the actual candidates and we
-					// have an allow list (i.e. the user has probably set some sort of a
-					// filter restricting this search further. As a result we have to
-					// ignore items not on the list
-					if !allowList.Contains(neighborID) {
-						h.logger.Error("miss")
-						continue
-					} else {
-						h.logger.Error("hit")
-					}
-				}
 				if h.hasTombstone(neighborID) {
 					continue
 				}
@@ -390,6 +349,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 	h.pools.visitedListsLock.RLock()
 	h.pools.visitedLists.Return(visited)
+	h.pools.visitedLists.Return(visitedExp)
 	h.pools.visitedListsLock.RUnlock()
 
 	return results, nil
