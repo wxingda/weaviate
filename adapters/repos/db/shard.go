@@ -12,6 +12,7 @@
 package db
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -352,7 +353,7 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		WithField("action", "downloading shard from s3 bucket").
 		Infof("shard=%s", s.name)
 
-	manager := manager.NewDownloader(s.s3client, func(d *manager.Downloader) {
+	downloader := manager.NewDownloader(s.s3client, func(d *manager.Downloader) {
 		d.Concurrency = 20
 		d.PartSize = 64 * 1024 * 1024 // 64MB per part
 		d.BufferProvider = manager.NewPooledBufferedWriterReadFromProvider(4096 * 4)
@@ -363,7 +364,7 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		Prefix: &s.name,
 	})
 
-	var wg sync.WaitGroup
+	buf := manager.NewWriteAtBuffer([]byte{})
 
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -372,20 +373,34 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		}
 
 		for _, obj := range page.Contents {
-			wg.Add(1)
+			key := aws.ToString(obj.Key)
 
-			go func(key string) {
-				defer wg.Done()
+			_, err = downloader.Download(ctx, buf, &s3.GetObjectInput{Bucket: &s.bucketName, Key: &key})
+			if err != nil {
+				return err
+			}
 
-				if err := s.downloadFile(ctx, manager, s.path(), s.bucketName, key); err != nil {
-					panic(err)
-				}
-			}(aws.ToString(obj.Key))
+			targetDirectory := s.path()
 
+			file := filepath.Join(targetDirectory, strings.TrimPrefix(key, s.name))
+			if err := os.MkdirAll(filepath.Dir(file), os.ModePerm); err != nil {
+				return err
+			}
+
+			fd, err := os.Create(file)
+			if err != nil {
+				return err
+			}
+			defer fd.Close()
+
+			_, err = fd.Write(buf.Bytes())
+			if err != nil {
+				return err
+			}
+
+			buf = manager.NewWriteAtBuffer(buf.Bytes()[0:0])
 		}
 	}
-
-	wg.Wait()
 
 	s.index.logger.
 		WithField("action", "successfully downloaded shard from s3 bucket").
@@ -393,22 +408,6 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		Infof("shard=%s", s.name)
 
 	return nil
-}
-
-func (s *Shard) downloadFile(ctx context.Context, downloader *manager.Downloader, targetDirectory, bucket, key string) error {
-	file := filepath.Join(targetDirectory, strings.TrimPrefix(key, s.name))
-	if err := os.MkdirAll(filepath.Dir(file), os.ModePerm); err != nil {
-		return err
-	}
-
-	fd, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	defer fd.Close()
-
-	_, err = downloader.Download(ctx, fd, &s3.GetObjectInput{Bucket: &bucket, Key: &key})
-	return err
 }
 
 func (s *Shard) hasTargetVectors() bool {
@@ -1101,38 +1100,30 @@ func (s *Shard) Shutdown(ctx context.Context) error {
 		u.PartSize = 64 * 1024 * 1024 // 64MB per part
 	})
 
-	var wg sync.WaitGroup
-
 	for path := range walker {
-		wg.Add(1)
+		rel, err := filepath.Rel(s.path(), path)
+		if err != nil {
+			panic(fmt.Errorf("%w: unable to get relative path", err))
+		}
 
-		go func(path string) {
-			defer wg.Done()
+		file, err := os.Open(path)
+		if err != nil {
+			panic(fmt.Errorf("%w: failed opening file", err))
+		}
 
-			rel, err := filepath.Rel(s.path(), path)
-			if err != nil {
-				panic(fmt.Errorf("%w: unable to get relative path", err))
-			}
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket: &s.bucketName,
+			Key:    aws.String(filepath.Join(s.name, rel)),
+			Body:   bufio.NewReader(file),
+		},
+		)
+		if err != nil {
+			file.Close()
+			panic(fmt.Errorf("%w: failed to upload", err))
+		}
 
-			file, err := os.Open(path)
-			if err != nil {
-				panic(fmt.Errorf("%w: failed opening file", err))
-			}
-			defer file.Close()
-
-			_, err = uploader.Upload(ctx, &s3.PutObjectInput{
-				Bucket: &s.bucketName,
-				Key:    aws.String(filepath.Join(s.name, rel)),
-				Body:   file,
-			})
-			if err != nil {
-				panic(fmt.Errorf("%w: failed to upload", err))
-			}
-		}(path)
-
+		file.Close()
 	}
-
-	wg.Wait()
 
 	s.index.logger.
 		WithField("action", "successfully uploaded shard to s3 bucket").
