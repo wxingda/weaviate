@@ -63,6 +63,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 const IdLockPoolSize = 128
@@ -281,6 +282,16 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create bucket shard %q", s.ID())
+		}
+
+		_, err = s.s3client.PutBucketAccelerateConfiguration(ctx, &s3.PutBucketAccelerateConfigurationInput{
+			Bucket: &s.bucketName,
+			AccelerateConfiguration: &types.AccelerateConfiguration{
+				Status: types.BucketAccelerateStatusEnabled,
+			},
+		})
+		if err != nil {
+			s.index.logger.Warnf("failed to enable accelerate bucket shard %q: %v", s.ID(), err)
 		}
 	}
 
