@@ -365,9 +365,9 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		Infof("shard=%s", s.name)
 
 	downloader := manager.NewDownloader(s.s3client, func(d *manager.Downloader) {
-		d.Concurrency = 20
+		d.Concurrency = 25
 		d.PartSize = 64 * 1024 * 1024 // 64MB per part
-		d.BufferProvider = manager.NewPooledBufferedWriterReadFromProvider(4096 * 4)
+		d.BufferProvider = manager.NewPooledBufferedWriterReadFromProvider(5 * 1024 * 1024)
 	})
 
 	paginator := s3.NewListObjectsV2Paginator(s.s3client, &s3.ListObjectsV2Input{
@@ -375,7 +375,7 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		Prefix: &s.name,
 	})
 
-	buf := manager.NewWriteAtBuffer([]byte{})
+	targetDirectory := s.path()
 
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -386,30 +386,23 @@ func (s *Shard) mayDownloadFromRemoteStorage(ctx context.Context) error {
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
 
-			_, err = downloader.Download(ctx, buf, &s3.GetObjectInput{Bucket: &s.bucketName, Key: &key})
+			fileName := filepath.Join(targetDirectory, strings.TrimPrefix(key, s.name))
+			if err := os.MkdirAll(filepath.Dir(fileName), os.ModePerm); err != nil {
+				return err
+			}
+
+			fd, err := os.Create(fileName)
 			if err != nil {
 				return err
 			}
 
-			targetDirectory := s.path()
-
-			file := filepath.Join(targetDirectory, strings.TrimPrefix(key, s.name))
-			if err := os.MkdirAll(filepath.Dir(file), os.ModePerm); err != nil {
-				return err
-			}
-
-			fd, err := os.Create(file)
+			_, err = downloader.Download(ctx, fd, &s3.GetObjectInput{Bucket: &s.bucketName, Key: &key})
 			if err != nil {
-				return err
-			}
-			defer fd.Close()
-
-			_, err = fd.Write(buf.Bytes())
-			if err != nil {
+				fd.Close()
 				return err
 			}
 
-			buf = manager.NewWriteAtBuffer(buf.Bytes()[0:0])
+			fd.Close()
 		}
 	}
 
@@ -1107,8 +1100,9 @@ func (s *Shard) Shutdown(ctx context.Context) error {
 	}()
 
 	uploader := manager.NewUploader(s.s3client, func(u *manager.Uploader) {
-		u.Concurrency = 20
+		u.Concurrency = 25
 		u.PartSize = 64 * 1024 * 1024 // 64MB per part
+		u.BufferProvider = manager.NewBufferedReadSeekerWriteToPool(5 * 1024 * 1024)
 	})
 
 	for path := range walker {
