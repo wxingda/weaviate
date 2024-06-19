@@ -21,7 +21,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const MaxFilters = 2
+const MaxFilters = 4
 
 func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 	max int, denyList helpers.AllowList, labels []byte,
@@ -94,7 +94,7 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 			currLabels := h.nodes[curr.ID].labels
 			allAreSaturated := true
 			for _, sumIndex := range currLabels {
-				if sums[sumIndex] < max/MaxFilters {
+				if sums[sumIndex] < max/len(currLabels) {
 					allAreSaturated = false
 					break
 				}

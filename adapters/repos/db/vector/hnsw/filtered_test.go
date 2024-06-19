@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -224,7 +226,7 @@ func Test_Encoders(t *testing.T) {
 
 	efConstruction := 256
 	ef := []int{16, 32, 64, 128, 256, 512}
-	maxNeighbors := 24
+	maxNeighbors := 36
 
 	uc := ent.UserConfig{
 		MaxConnections: maxNeighbors,
@@ -266,7 +268,7 @@ func Test_Encoders(t *testing.T) {
 			filteredNeighbors := make([]uint64, 0, k)
 			j := 0
 			for curr := 0; curr < len(neighbors[i]); curr++ {
-				if len(labels[neighbors[i][curr]]) == 2 {
+				if slices.Contains(labels[neighbors[i][curr]], 1) {
 					filteredNeighbors = append(filteredNeighbors, neighbors[i][curr])
 					j++
 					if j == k {
