@@ -199,7 +199,7 @@ func train(file *hdf5.File) ([][]float32, error) {
 }
 
 func Test_Encoders(t *testing.T) {
-	filterRate := 0.05
+	filterRate := []float32{0.05, 0.5, 0.2, 0.1, 0.4, 0.05, 0.5, 0.2, 0.1, 0.4, 0.05, 0.5, 0.2, 0.1, 0.4, 0.05, 0.5, 0.2, 0.1}
 	path := "/Users/abdel/Documents/datasets/dbpedia-100k-openai-ada002.hdf5"
 	file, err := hdf5.OpenFile(path, hdf5.F_ACC_RDONLY)
 	assert.Nil(t, err)
@@ -210,10 +210,12 @@ func Test_Encoders(t *testing.T) {
 	fmt.Println(len(data[0]))
 	labels := make([][]byte, len(data))
 	for i := 0; i < len(data); i++ {
-		if rand.Float64() < filterRate {
-			labels[i] = []byte{0, 1}
-		} else {
-			labels[i] = []byte{0}
+		labels[i] = make([]byte, 0, MaxFilters)
+		labels[i] = append(labels[i], 0)
+		for j := 0; j < MaxFilters-1; j++ {
+			if float32(rand.Float64()) < filterRate[j] {
+				labels[i] = append(labels[i], byte(j+1))
+			}
 		}
 	}
 
@@ -273,7 +275,6 @@ func Test_Encoders(t *testing.T) {
 				}
 			}
 			hits := MatchesInLists(filteredNeighbors, results)
-			//hits := MatchesInLists(neighbors[i][:k], results)
 			mutex.Lock()
 			relevant += hits
 			total += len(filteredNeighbors)
@@ -284,7 +285,7 @@ func Test_Encoders(t *testing.T) {
 		recall := float32(relevant) / float32(total)
 		latency := float32(ellapsed.Milliseconds()) / float32(len(testData))
 		fmt.Print("ef: ", currEf, " -> ")
-		fmt.Println(recall, latency, float32(total)/float32(len(testData)))
+		fmt.Println(recall, latency, 10000.0/latency)
 	}
 	assert.Nil(t, index)
 }

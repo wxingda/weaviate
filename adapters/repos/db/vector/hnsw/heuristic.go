@@ -21,6 +21,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const MaxFilters = 2
+
 func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 	max int, denyList helpers.AllowList, labels []byte,
 ) error {
@@ -82,21 +84,23 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 		vecs, errs := h.multiVectorForID(context.TODO(), ids)
 
 		returnList = h.pools.pqItemSlice.Get().([]priorityqueue.Item[uint64])
-		sum0 := 0
-		sum1 := 1
+		sums := make([]int, MaxFilters)
 
 		for closestFirst.Len() > 0 && len(returnList) < max {
 			curr := closestFirst.Pop()
 			if denyList != nil && denyList.Contains(curr.ID) {
 				continue
 			}
-			if len(labels) == 2 {
-				if sum0 >= max/2 && len(h.nodes[curr.ID].labels) == 1 {
-					continue
+			currLabels := h.nodes[curr.ID].labels
+			allAreSaturated := true
+			for _, sumIndex := range currLabels {
+				if sums[sumIndex] < max/MaxFilters {
+					allAreSaturated = false
+					break
 				}
-				if sum1 >= max/2 && len(h.nodes[curr.ID].labels) == 2 {
-					continue
-				}
+			}
+			if allAreSaturated {
+				continue
 			}
 			distToQuery := curr.Dist
 
@@ -124,9 +128,8 @@ func (h *hnsw) selectNeighborsHeuristic(input *priorityqueue.Queue[any],
 			}
 
 			if good {
-				sum0++
-				if len(h.nodes[curr.ID].labels) == 2 {
-					sum1++
+				for sumIndex := range h.nodes[curr.ID].labels {
+					sums[sumIndex]++
 				}
 				returnList = append(returnList, curr)
 			}
