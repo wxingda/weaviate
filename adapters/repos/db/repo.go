@@ -204,6 +204,7 @@ type Config struct {
 	AvoidMMap                 bool
 	DisableLazyLoadShards     bool
 	Replication               replication.GlobalConfig
+	PropsToIndexRangeable     map[string][]string
 }
 
 // GetIndex returns the index if it exists or nil if it doesn't

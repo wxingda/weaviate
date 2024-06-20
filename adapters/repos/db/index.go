@@ -562,6 +562,8 @@ type IndexConfig struct {
 	DisableLazyLoadShards     bool
 
 	TrackVectorDimensions bool
+
+	PropsToIndexRangeable map[string][]string
 }
 
 func indexID(class schema.ClassName) string {

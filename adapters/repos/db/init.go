@@ -98,6 +98,7 @@ func (db *DB) init(ctx context.Context) error {
 				DisableLazyLoadShards:     db.config.DisableLazyLoadShards,
 				ReplicationFactor:         NewAtomicInt64(class.ReplicationConfig.Factor),
 				AsyncReplicationEnabled:   class.ReplicationConfig.AsyncEnabled,
+				PropsToIndexRangeable:     db.config.PropsToIndexRangeable,
 			}, db.schemaGetter.CopyShardingState(class.Class),
 				inverted.ConfigFromModel(invertedConfig),
 				convertToVectorIndexConfig(class.VectorIndexConfig),
