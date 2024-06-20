@@ -9,7 +9,7 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package modgenerativeanyscale
+package modgenerativemartian
 
 import (
 	"context"
@@ -21,18 +21,18 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/entities/modulecapabilities"
 	"github.com/weaviate/weaviate/entities/moduletools"
-	"github.com/weaviate/weaviate/modules/generative-anyscale/clients"
+	"github.com/weaviate/weaviate/modules/generative-martian/clients"
 	additionalprovider "github.com/weaviate/weaviate/usecases/modulecomponents/additional"
 	generativemodels "github.com/weaviate/weaviate/usecases/modulecomponents/additional/models"
 )
 
-const Name = "generative-anyscale"
+const Name = "generative-martian"
 
-func New() *GenerativeAnyscaleModule {
-	return &GenerativeAnyscaleModule{}
+func New() *GenerativeMartianModule {
+	return &GenerativeMartianModule{}
 }
 
-type GenerativeAnyscaleModule struct {
+type GenerativeMartianModule struct {
 	generative                   generativeClient
 	additionalPropertiesProvider modulecapabilities.AdditionalProperties
 }
@@ -44,15 +44,15 @@ type generativeClient interface {
 	MetaInfo() (map[string]interface{}, error)
 }
 
-func (m *GenerativeAnyscaleModule) Name() string {
+func (m *GenerativeMartianModule) Name() string {
 	return Name
 }
 
-func (m *GenerativeAnyscaleModule) Type() modulecapabilities.ModuleType {
+func (m *GenerativeMartianModule) Type() modulecapabilities.ModuleType {
 	return modulecapabilities.Text2TextGenerative
 }
 
-func (m *GenerativeAnyscaleModule) Init(ctx context.Context,
+func (m *GenerativeMartianModule) Init(ctx context.Context,
 	params moduletools.ModuleInitParams,
 ) error {
 	if err := m.initAdditional(ctx, params.GetConfig().ModuleHttpClientTimeout, params.GetLogger()); err != nil {
@@ -62,10 +62,10 @@ func (m *GenerativeAnyscaleModule) Init(ctx context.Context,
 	return nil
 }
 
-func (m *GenerativeAnyscaleModule) initAdditional(ctx context.Context, timeout time.Duration,
+func (m *GenerativeMartianModule) initAdditional(ctx context.Context, timeout time.Duration,
 	logger logrus.FieldLogger,
 ) error {
-	apiKey := os.Getenv("ANYSCALE_APIKEY")
+	apiKey := os.Getenv("Martian_APIKEY")
 
 	client := clients.New(apiKey, timeout, logger)
 
@@ -76,16 +76,16 @@ func (m *GenerativeAnyscaleModule) initAdditional(ctx context.Context, timeout t
 	return nil
 }
 
-func (m *GenerativeAnyscaleModule) MetaInfo() (map[string]interface{}, error) {
+func (m *GenerativeMartianModule) MetaInfo() (map[string]interface{}, error) {
 	return m.generative.MetaInfo()
 }
 
-func (m *GenerativeAnyscaleModule) RootHandler() http.Handler {
+func (m *GenerativeMartianModule) RootHandler() http.Handler {
 	// TODO: remove once this is a capability interface
 	return nil
 }
 
-func (m *GenerativeAnyscaleModule) AdditionalProperties() map[string]modulecapabilities.AdditionalProperty {
+func (m *GenerativeMartianModule) AdditionalProperties() map[string]modulecapabilities.AdditionalProperty {
 	return m.additionalPropertiesProvider.AdditionalProperties()
 }
 
