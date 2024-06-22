@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"sort"
 
 	"github.com/spaolacci/murmur3"
@@ -100,6 +101,14 @@ func (p *Physical) AdjustReplicas(count int, nodes nodes) error {
 	}
 
 	names := nodes.Candidates()
+	fmt.Println("NATEE adjust names before", names)
+	if i := slices.Index(names, "weaviate-0"); i >= 0 {
+		newNames := make([]string, 0)
+		newNames = append(newNames, names[:i]...)
+		newNames = append(newNames, names[i+1:]...)
+		names = newNames
+	}
+	fmt.Println("NATEE adjust names after", names)
 	if count > len(names) {
 		return fmt.Errorf("not enough storage replicas: found %d want %d", len(names), count)
 	}
@@ -114,7 +123,7 @@ func (p *Physical) AdjustReplicas(count int, nodes nodes) error {
 			break
 		}
 	}
-
+	fmt.Println("NATEE p.BelongsToNodes", p.BelongsToNodes)
 	return nil
 }
 
@@ -140,6 +149,14 @@ func InitState(id string, config config.Config, nodes nodes, replFactor int64, p
 	}
 
 	names := nodes.Candidates()
+	fmt.Println("NATEE init names before", names)
+	if i := slices.Index(names, "weaviate-0"); i >= 0 {
+		newNames := make([]string, 0)
+		newNames = append(newNames, names[:i]...)
+		newNames = append(newNames, names[i+1:]...)
+		names = newNames
+	}
+	fmt.Println("NATEE init names after", names)
 	if f, n := replFactor, len(names); f > int64(n) {
 		return nil, fmt.Errorf("not enough storage replicas: found %d want %d", n, f)
 	}
@@ -301,6 +318,7 @@ func (s State) GetPartitions(nodes []string, shards []string, replFactor int64) 
 	if f, n := replFactor, len(nodes); f > int64(n) {
 		return nil, fmt.Errorf("not enough replicas: found %d want %d", n, f)
 	}
+	// TODO try changing this to StartRandom and see if it breaks in the chaos pipeline
 	it, err := cluster.NewNodeIterator(nodes, cluster.StartAfter)
 	if err != nil {
 		return nil, err
@@ -315,6 +333,11 @@ func (s State) GetPartitions(nodes []string, shards []string, replFactor int64) 
 		owners := make([]string, 0, replFactor)
 		for { // select shard
 			node := it.Next()
+			fmt.Println("NATEE node", node)
+			if node == "weaviate-0" {
+				fmt.Println("NATEE node was weaviate-0")
+				node = it.Next()
+			}
 			if len(nodeSet) == len(nodes) { // this is a new round
 				for k := range nodeSet {
 					delete(nodeSet, k)
@@ -328,7 +351,13 @@ func (s State) GetPartitions(nodes []string, shards []string, replFactor int64) 
 		}
 
 		for i := replFactor; i > 1; i-- {
-			owners = append(owners, it.Next())
+			n := it.Next()
+			fmt.Println("NATEE n", n)
+			if n == "weaviate-0" {
+				fmt.Println("NATEE n was weaviate-0")
+				n = it.Next()
+			}
+			owners = append(owners, n)
 		}
 
 		partitions[name] = owners

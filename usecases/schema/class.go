@@ -133,6 +133,9 @@ func (h *Handler) AddClass(ctx context.Context, principal *models.Principal,
 	if err != nil {
 		return nil, 0, fmt.Errorf("init sharding state: %w", err)
 	}
+	for shardName := range shardState.Physical {
+		fmt.Println("NATEE shardName BelongsToNodes", shardName, shardState.Physical[shardName].BelongsToNodes)
+	}
 	version, err := h.schemaManager.AddClass(cls, shardState)
 	if err != nil {
 		return nil, 0, err

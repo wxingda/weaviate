@@ -198,6 +198,10 @@ func (m *metaClass) AddTenants(nodeID string, req *command.AddTenantsRequest, re
 		names[i] = tenant.Name
 	}
 	// First determine the partition based on the node *present at the time of the log entry being created*
+	fmt.Println("NATEE addtenants m.Sharding.Physical", m.Sharding.Physical)
+	for shardName := range m.Sharding.Physical {
+		fmt.Println("NATEE addtenants shardName BelongsToNodes", shardName, m.Sharding.Physical[shardName].BelongsToNodes)
+	}
 	partitions, err := m.Sharding.GetPartitions(req.ClusterNodes, names, replFactor)
 	if err != nil {
 		return fmt.Errorf("get partitions: %w", err)
@@ -216,6 +220,7 @@ func (m *metaClass) AddTenants(nodeID string, req *command.AddTenantsRequest, re
 			continue
 		}
 		p := sharding.Physical{Name: t.Name, Status: t.Status, BelongsToNodes: part}
+		fmt.Println("NATEE addtenants p.BelongsToNodes", p.BelongsToNodes)
 		m.Sharding.Physical[t.Name] = p
 		// TODO-RAFT: Check here why we set =nil if it is "owned by another node"
 		if !slices.Contains(part, nodeID) {
