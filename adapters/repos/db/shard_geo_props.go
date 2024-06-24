@@ -27,15 +27,15 @@ import (
 func (s *Shard) initGeoProp(prop *models.Property) error {
 	// starts geo props cycles if actual geo property is present
 	// (safe to start multiple times)
-	s.index.cycleCallbacks.geoPropsCommitLoggerCycle.Start()
-	s.index.cycleCallbacks.geoPropsTombstoneCleanupCycle.Start()
+	s.index.CycleCallbacks.geoPropsCommitLoggerCycle.Start()
+	s.index.CycleCallbacks.geoPropsTombstoneCleanupCycle.Start()
 
 	idx, err := geo.NewIndex(geo.Config{
 		ID:                 geoPropID(prop.Name),
 		RootPath:           s.path(),
 		CoordinatesForID:   s.makeCoordinatesForID(prop.Name),
 		DisablePersistence: false,
-		Logger:             s.index.logger,
+		Logger:             s.index.Logger,
 	},
 		s.cycleCallbacks.geoPropsCommitLoggerCallbacks,
 		s.cycleCallbacks.geoPropsTombstoneCleanupCallbacks,

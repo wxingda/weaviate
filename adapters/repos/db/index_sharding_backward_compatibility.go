@@ -47,7 +47,7 @@ func (i *Index) checkSingleShardMigration() error {
 			return errors.Wrapf(err, "migrate shard %q to %q", oldPath, newPath)
 		}
 
-		i.logger.WithField("action", "index_startup_migrate_shards_successful").
+		i.Logger.WithField("action", "index_startup_migrate_shards_successful").
 			WithField("old_shard", oldPath).
 			WithField("new_shard", newPath).
 			Infof("successfully migrated shard file %q (created in an earlier version) to %q",

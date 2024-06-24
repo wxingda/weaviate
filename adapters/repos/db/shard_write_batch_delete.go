@@ -74,7 +74,7 @@ func (b *deleteObjectsBatcher) deleteSingleBatchInLSM(ctx context.Context, batch
 		return result
 	}
 
-	eg := enterrors.NewErrorGroupWrapper(b.shard.Index().logger)
+	eg := enterrors.NewErrorGroupWrapper(b.shard.Index().Logger)
 	eg.SetLimit(_NUMCPU) // prevent unbounded concurrency
 
 	for j, docID := range batch {
@@ -147,7 +147,7 @@ func (b *deleteObjectsBatcher) setErrorAtIndex(err error, index int) {
 }
 
 func (s *Shard) findDocIDs(ctx context.Context, filters *filters.LocalFilter) ([]uint64, error) {
-	allowList, err := inverted.NewSearcher(s.index.logger, s.store, s.index.getSchema.ReadOnlyClass,
+	allowList, err := inverted.NewSearcher(s.index.Logger, s.store, s.index.GetSchema.ReadOnlyClass,
 		nil, s.index.classSearcher, s.index.stopwords, s.versioner.version, s.isFallbackToSearchable,
 		s.tenant(), s.index.Config.QueryNestedRefLimit, s.bitmapFactory).
 		DocIDs(ctx, filters, additional.Properties{}, s.index.Config.ClassName)

@@ -27,7 +27,7 @@ func (s *Shard) initProperties(class *models.Class) error {
 		return nil
 	}
 
-	eg := enterrors.NewErrorGroupWrapper(s.index.logger)
+	eg := enterrors.NewErrorGroupWrapper(s.index.Logger)
 	s.createPropertyIndex(context.Background(), eg, class.Properties...)
 
 	eg.Go(func() error {

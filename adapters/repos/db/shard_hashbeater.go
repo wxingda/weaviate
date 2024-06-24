@@ -31,14 +31,14 @@ import (
 
 func (s *Shard) initHashBeater() {
 	enterrors.GoWrapper(func() {
-		s.index.logger.
+		s.index.Logger.
 			WithField("action", "async_replication").
 			WithField("class_name", s.class.Class).
 			WithField("shard_name", s.name).
 			Info("hashbeater started...")
 
 		defer func() {
-			s.index.logger.
+			s.index.Logger.
 				WithField("action", "async_replication").
 				WithField("class_name", s.class.Class).
 				WithField("shard_name", s.name).
@@ -78,7 +78,7 @@ func (s *Shard) initHashBeater() {
 					return
 				}
 				if err != nil {
-					s.index.logger.
+					s.index.Logger.
 						WithField("action", "async_replication").
 						WithField("class_name", s.class.Class).
 						WithField("shard_name", s.name).
@@ -118,7 +118,7 @@ func (s *Shard) initHashBeater() {
 					}
 				}
 
-				logEntry := s.index.logger.
+				logEntry := s.index.Logger.
 					WithField("action", "async_replication").
 					WithField("class_name", s.class.Class).
 					WithField("shard_name", s.name).
@@ -150,7 +150,7 @@ func (s *Shard) initHashBeater() {
 				}
 			}
 		}
-	}, s.index.logger)
+	}, s.index.Logger)
 
 	enterrors.GoWrapper(func() {
 		t := time.NewTicker(100 * time.Millisecond)
@@ -171,7 +171,7 @@ func (s *Shard) initHashBeater() {
 				}
 			}
 		}
-	}, s.index.logger)
+	}, s.index.Logger)
 }
 
 func (s *Shard) setLastComparedNodes(hosts []string) {

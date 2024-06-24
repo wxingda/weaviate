@@ -51,7 +51,7 @@ type ShardInvertedReindexer struct {
 }
 
 func NewShardInvertedReindexer(shard ShardLike, logger logrus.FieldLogger) *ShardInvertedReindexer {
-	class := shard.Index().getSchema.ReadOnlyClass(shard.Index().Config.ClassName.String())
+	class := shard.Index().GetSchema.ReadOnlyClass(shard.Index().Config.ClassName.String())
 	if class == nil {
 		return nil
 	}

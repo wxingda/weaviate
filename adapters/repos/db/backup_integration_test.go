@@ -72,9 +72,9 @@ func TestBackup_DBLevel(t *testing.T) {
 		require.Nil(t, err)
 		expectedPropLength, err := os.ReadFile(testShd.GetPropertyLengthTracker().FileName())
 		require.Nil(t, err)
-		expectedShardState, err := testShd.Index().getSchema.CopyShardingState(className).JSON()
+		expectedShardState, err := testShd.Index().GetSchema.CopyShardingState(className).JSON()
 		require.Nil(t, err)
-		expectedSchema, err := testShd.Index().getSchema.GetSchemaSkipAuth().
+		expectedSchema, err := testShd.Index().GetSchema.GetSchemaSkipAuth().
 			Objects.Classes[0].MarshalBinary()
 		require.Nil(t, err)
 

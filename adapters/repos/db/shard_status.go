@@ -65,7 +65,7 @@ func (s *Shard) updateStatusUnlocked(in string) error {
 	s.status = targetStatus
 	s.updateStoreStatus(targetStatus)
 
-	s.index.logger.
+	s.index.Logger.
 		WithField("action", "update shard status").
 		WithField("class", s.index.Config.ClassName).
 		WithField("shard", s.name).

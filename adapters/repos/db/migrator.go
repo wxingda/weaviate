@@ -380,12 +380,12 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 			defer cancel()
 
 			if err := asLL.Load(ctx); err != nil {
-				idx.logger.WithFields(logrus.Fields{
+				idx.Logger.WithFields(logrus.Fields{
 					"action": "tenant_activation_lazy_laod_shard",
 					"shard":  name,
 				}).WithError(err).Errorf("loading shard %q failed", name)
 			}
-		}, idx.logger)
+		}, idx.Logger)
 	}
 
 	if len(updatesCold) > 0 {
@@ -417,7 +417,7 @@ func (m *Migrator) UpdateTenants(ctx context.Context, class *models.Class, updat
 				if err := shard.Shutdown(ctx); err != nil {
 					if !errors.Is(err, errAlreadyShutdown) {
 						ec.Add(err)
-						idx.logger.WithField("action", "shutdown_shard").
+						idx.Logger.WithField("action", "shutdown_shard").
 							WithField("shard", shard.ID()).Error(err)
 					}
 					m.logger.WithField("shard", shard.Name()).Debug("was already shut or dropped")

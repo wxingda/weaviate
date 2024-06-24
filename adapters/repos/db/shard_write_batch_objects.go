@@ -181,7 +181,7 @@ func (ob *objectsBatcher) storeSingleBatchInLSM(ctx context.Context,
 				errLock.Unlock()
 			}
 		}
-		enterrors.GoWrapper(f, ob.shard.Index().logger)
+		enterrors.GoWrapper(f, ob.shard.Index().Logger)
 
 	}
 	wg.Wait()

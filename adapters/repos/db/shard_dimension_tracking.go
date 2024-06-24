@@ -151,7 +151,7 @@ func (s *Shard) initDimensionTracking() {
 				}
 			}
 		}
-		enterrors.GoWrapper(f, s.index.logger)
+		enterrors.GoWrapper(f, s.index.Logger)
 	}
 }
 
@@ -161,7 +161,7 @@ func (s *Shard) publishDimensionMetrics(ctx context.Context) {
 
 		if !s.hasTargetVectors() {
 			// send stats for legacy vector only
-			switch category, segments := getDimensionCategory(s.index.vectorIndexUserConfig); category {
+			switch category, segments := getDimensionCategory(s.index.VectorIndexUserConfig); category {
 			case DimensionCategoryPQ:
 				count := s.QuantizedDimensions(ctx, segments)
 				sendVectorSegmentsMetric(s.promMetrics, className, s.name, count)
@@ -208,7 +208,7 @@ func (s *Shard) publishDimensionMetrics(ctx context.Context) {
 
 func (s *Shard) clearDimensionMetrics() {
 	clearDimensionMetrics(s.promMetrics, s.index.Config.ClassName.String(),
-		s.name, s.index.vectorIndexUserConfig, s.index.vectorIndexUserConfigs)
+		s.name, s.index.VectorIndexUserConfig, s.index.vectorIndexUserConfigs)
 }
 
 func clearDimensionMetrics(promMetrics *monitoring.PrometheusMetrics,

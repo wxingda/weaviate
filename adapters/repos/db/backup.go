@@ -207,7 +207,7 @@ func (i *Index) descriptor(ctx context.Context, backupID string, desc *backup.Cl
 	}
 	defer func() {
 		if err != nil {
-			enterrors.GoWrapper(func() { i.ReleaseBackup(ctx, backupID) }, i.logger)
+			enterrors.GoWrapper(func() { i.ReleaseBackup(ctx, backupID) }, i.Logger)
 		}
 	}()
 	// prevent writing into the index during collection of metadata
@@ -242,7 +242,7 @@ func (i *Index) descriptor(ctx context.Context, backupID string, desc *backup.Cl
 // async background and maintenance processes. It errors if the backup does not exist
 // or is already inactive.
 func (i *Index) ReleaseBackup(ctx context.Context, id string) error {
-	i.logger.WithField("backup_id", id).WithField("class", i.Config.ClassName).Info("release backup")
+	i.Logger.WithField("backup_id", id).WithField("class", i.Config.ClassName).Info("release backup")
 	defer i.resetBackupState()
 	if err := i.resumeMaintenanceCycles(ctx); err != nil {
 		return err
@@ -277,7 +277,7 @@ func (i *Index) resumeMaintenanceCycles(ctx context.Context) (lastErr error) {
 	i.ForEachShard(func(name string, shard ShardLike) error {
 		if err := shard.resumeMaintenanceCycles(ctx); err != nil {
 			lastErr = err
-			i.logger.WithField("shard", name).WithField("op", "resume_maintenance").Error(err)
+			i.Logger.WithField("shard", name).WithField("op", "resume_maintenance").Error(err)
 		}
 		time.Sleep(time.Millisecond * 10)
 		return nil
@@ -286,7 +286,7 @@ func (i *Index) resumeMaintenanceCycles(ctx context.Context) (lastErr error) {
 }
 
 func (i *Index) marshalShardingState() ([]byte, error) {
-	b, err := i.getSchema.CopyShardingState(i.Config.ClassName.String()).JSON()
+	b, err := i.GetSchema.CopyShardingState(i.Config.ClassName.String()).JSON()
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal sharding state")
 	}
@@ -295,7 +295,7 @@ func (i *Index) marshalShardingState() ([]byte, error) {
 }
 
 func (i *Index) marshalSchema() ([]byte, error) {
-	b, err := i.getSchema.ReadOnlyClass(i.Config.ClassName.String()).MarshalBinary()
+	b, err := i.GetSchema.ReadOnlyClass(i.Config.ClassName.String()).MarshalBinary()
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal schema")
 	}

@@ -261,9 +261,9 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 		class:       class,
 		name:        shardName,
 		promMetrics: promMetrics,
-		metrics: NewMetrics(index.logger, promMetrics,
+		metrics: NewMetrics(index.Logger, promMetrics,
 			string(index.Config.ClassName), shardName),
-		slowQueryReporter:     helpers.NewSlowQueryReporterFromEnv(index.logger),
+		slowQueryReporter:     helpers.NewSlowQueryReporterFromEnv(index.Logger),
 		stopDimensionTracking: make(chan struct{}),
 		replicationMap:        pendingReplicaTasks{Tasks: make(map[string]replicaTask, 32)},
 		centralJobQueue:       jobQueueCh,
@@ -346,21 +346,21 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 				}
 			}
 		}
-		enterrors.GoWrapper(f, s.index.logger)
+		enterrors.GoWrapper(f, s.index.Logger)
 	}
 	s.NotifyReady()
 
 	if exists {
-		s.index.logger.Printf("Completed loading shard %s in %s", s.ID(), time.Since(before))
+		s.index.Logger.Printf("Completed loading shard %s in %s", s.ID(), time.Since(before))
 	} else {
-		s.index.logger.Printf("Created shard %s in %s", s.ID(), time.Since(before))
+		s.index.Logger.Printf("Created shard %s in %s", s.ID(), time.Since(before))
 	}
 
 	return s, nil
 }
 
 func (s *Shard) hasTargetVectors() bool {
-	return hasTargetVectors(s.index.vectorIndexUserConfig, s.index.vectorIndexUserConfigs)
+	return hasTargetVectors(s.index.VectorIndexUserConfig, s.index.vectorIndexUserConfigs)
 }
 
 // target vectors and legacy vector are (supposed to be) exclusive
@@ -385,7 +385,7 @@ func (s *Shard) initTargetQueues() error {
 	s.queues = make(map[string]*IndexQueue)
 	for targetVector, vectorIndex := range s.vectorIndexes {
 		queue, err := NewIndexQueue(s.index.Config.ClassName.String(), s.ID(), targetVector, s, vectorIndex, s.centralJobQueue,
-			s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger}, s.promMetrics)
+			s.indexCheckpoints, IndexQueueOptions{Logger: s.index.Logger}, s.promMetrics)
 		if err != nil {
 			return fmt.Errorf("cannot create index queue for %q: %w", targetVector, err)
 		}
@@ -395,7 +395,7 @@ func (s *Shard) initTargetQueues() error {
 }
 
 func (s *Shard) initLegacyVector(ctx context.Context) error {
-	vectorindex, err := s.initVectorIndex(ctx, "", s.index.vectorIndexUserConfig)
+	vectorindex, err := s.initVectorIndex(ctx, "", s.index.VectorIndexUserConfig)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (s *Shard) initLegacyVector(ctx context.Context) error {
 
 func (s *Shard) initLegacyQueue() error {
 	queue, err := NewIndexQueue(s.index.Config.ClassName.String(), s.ID(), "", s, s.vectorIndex, s.centralJobQueue,
-		s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger}, s.promMetrics)
+		s.indexCheckpoints, IndexQueueOptions{Logger: s.index.Logger}, s.promMetrics)
 	if err != nil {
 		return err
 	}
@@ -449,8 +449,8 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 			vectorIndex = noop.NewIndex()
 		} else {
 			// starts vector cycles if vector is configured
-			s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
-			s.index.cycleCallbacks.vectorTombstoneCleanupCycle.Start()
+			s.index.CycleCallbacks.vectorCommitLoggerCycle.Start()
+			s.index.CycleCallbacks.vectorTombstoneCleanupCycle.Start()
 
 			// a shard can actually have multiple vector indexes:
 			// - the main index, which is used for all normal object vectors
@@ -460,7 +460,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 			vecIdxID := s.vectorIndexID(targetVector)
 
 			vi, err := hnsw.New(hnsw.Config{
-				Logger:               s.index.logger,
+				Logger:               s.index.Logger,
 				RootPath:             s.path(),
 				ID:                   vecIdxID,
 				ShardName:            s.name,
@@ -471,7 +471,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 				DistanceProvider:     distProv,
 				MakeCommitLoggerThunk: func() (hnsw.CommitLogger, error) {
 					return hnsw.NewCommitLogger(s.path(), vecIdxID,
-						s.index.logger, s.cycleCallbacks.vectorCommitLoggerCallbacks,
+						s.index.Logger, s.cycleCallbacks.vectorCommitLoggerCallbacks,
 						hnsw.WithAllocChecker(s.index.allocChecker),
 						hnsw.WithCommitlogThresholdForCombining(s.index.Config.HNSWMaxLogSize),
 						// consistent with previous logic where the individual limit is 1/5 of the combined limit
@@ -493,7 +493,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 			return nil, errors.Errorf("flat vector index: config is not flat.UserConfig: %T",
 				vectorIndexUserConfig)
 		}
-		s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
+		s.index.CycleCallbacks.vectorCommitLoggerCycle.Start()
 
 		// a shard can actually have multiple vector indexes:
 		// - the main index, which is used for all normal object vectors
@@ -505,7 +505,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 		vi, err := flat.New(flat.Config{
 			ID:               vecIdxID,
 			TargetVector:     targetVector,
-			Logger:           s.index.logger,
+			Logger:           s.index.Logger,
 			DistanceProvider: distProv,
 			AllocChecker:     s.index.allocChecker,
 		}, flatUserConfig, s.store)
@@ -519,7 +519,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 			return nil, errors.Errorf("dynamic vector index: config is not dynamic.UserConfig: %T",
 				vectorIndexUserConfig)
 		}
-		s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
+		s.index.CycleCallbacks.vectorCommitLoggerCycle.Start()
 
 		// a shard can actually have multiple vector indexes:
 		// - the main index, which is used for all normal object vectors
@@ -531,7 +531,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 		vi, err := dynamic.New(dynamic.Config{
 			ID:                   vecIdxID,
 			TargetVector:         targetVector,
-			Logger:               s.index.logger,
+			Logger:               s.index.Logger,
 			DistanceProvider:     distProv,
 			RootPath:             s.path(),
 			ShardName:            s.name,
@@ -541,7 +541,7 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 			TempVectorForIDThunk: hnsw.NewTempVectorForIDThunk(targetVector, s.readVectorByIndexIDIntoSlice),
 			MakeCommitLoggerThunk: func() (hnsw.CommitLogger, error) {
 				return hnsw.NewCommitLogger(s.path(), vecIdxID,
-					s.index.logger, s.cycleCallbacks.vectorCommitLoggerCallbacks)
+					s.index.Logger, s.cycleCallbacks.vectorCommitLoggerCallbacks)
 			},
 			TombstoneCallbacks:       s.cycleCallbacks.vectorTombstoneCleanupCallbacks,
 			ShardCompactionCallbacks: s.cycleCallbacks.compactionCallbacks,
@@ -571,7 +571,7 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 			return errors.Wrapf(err, "init shard %q: shard hashtree", s.ID())
 		}
 	} else if s.index.replicationEnabled() {
-		s.index.logger.Infof("async replication disabled on shard %q", s.ID())
+		s.index.Logger.Infof("async replication disabled on shard %q", s.ID())
 	}
 
 	counter, err := indexcounter.New(s.path())
@@ -579,7 +579,7 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 		return errors.Wrapf(err, "init shard %q: index counter", s.ID())
 	}
 	s.counter = counter
-	s.bitmapFactory = roaringset.NewBitmapFactory(s.counter.Get, s.index.logger)
+	s.bitmapFactory = roaringset.NewBitmapFactory(s.counter.Get, s.index.Logger)
 
 	dataPresent := s.counter.PreviewNext() != 0
 	versionPath := path.Join(s.path(), "version")
@@ -590,7 +590,7 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 	s.versioner = versioner
 
 	plPath := path.Join(s.path(), "proplengths")
-	tracker, err := inverted.NewJsonShardMetaData(plPath, s.index.logger)
+	tracker, err := inverted.NewJsonShardMetaData(plPath, s.index.Logger)
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: prop length tracker", s.ID())
 	}
@@ -634,7 +634,7 @@ func (s *Shard) uuidToIdLockPoolId(idBytes []byte) uint8 {
 }
 
 func (s *Shard) initLSMStore(ctx context.Context) error {
-	annotatedLogger := s.index.logger.WithFields(logrus.Fields{
+	annotatedLogger := s.index.Logger.WithFields(logrus.Fields{
 		"shard": s.name,
 		"index": s.index.ID(),
 		"class": s.index.Config.ClassName,
@@ -682,7 +682,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 	bucket := s.store.Bucket(helpers.ObjectsBucketLSM)
 
 	if bucket.GetSecondaryIndices() < 2 {
-		s.index.logger.
+		s.index.Logger.
 			WithField("action", "async_replication").
 			WithField("class_name", s.class.Class).
 			WithField("shard_name", s.name).
@@ -715,7 +715,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 
 		if s.hashtree != nil {
 			err := os.Remove(hashtreeFilename)
-			s.index.logger.
+			s.index.Logger.
 				WithField("action", "async_replication").
 				WithField("class_name", s.class.Class).
 				WithField("shard_name", s.name).
@@ -725,7 +725,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 
 		f, err := os.OpenFile(hashtreeFilename, os.O_RDONLY, os.ModePerm)
 		if err != nil {
-			s.index.logger.
+			s.index.Logger.
 				WithField("action", "async_replication").
 				WithField("class_name", s.class.Class).
 				WithField("shard_name", s.name).
@@ -740,7 +740,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 			s.hashtree, err = hashtree.DeserializeMultiSegmentHashTree(bufio.NewReader(f))
 		}
 		if err != nil {
-			s.index.logger.
+			s.index.Logger.
 				WithField("action", "async_replication").
 				WithField("class_name", s.class.Class).
 				WithField("shard_name", s.name).
@@ -753,7 +753,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 
 	if s.hashtree != nil {
 		s.hashtreeInitialized.Store(true)
-		s.index.logger.
+		s.index.Logger.
 			WithField("action", "async_replication").
 			WithField("class_name", s.class.Class).
 			WithField("shard_name", s.name).
@@ -786,7 +786,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 
 				prevContextEvaluation = time.Now()
 
-				s.index.logger.
+				s.index.Logger.
 					WithField("action", "async_replication").
 					WithField("class_name", s.class.Class).
 					WithField("shard_name", s.name).
@@ -809,7 +809,7 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 			return nil
 		})
 		if err != nil {
-			s.index.logger.
+			s.index.Logger.
 				WithField("action", "async_replication").
 				WithField("class_name", s.class.Class).
 				WithField("shard_name", s.name).
@@ -819,14 +819,14 @@ func (s *Shard) initHashTree(ctx context.Context) error {
 
 		s.hashtreeInitialized.Store(true)
 
-		s.index.logger.
+		s.index.Logger.
 			WithField("action", "async_replication").
 			WithField("class_name", s.class.Class).
 			WithField("shard_name", s.name).
 			Info("hashtree successfully initialized")
 
 		s.initHashBeater()
-	}, s.index.logger)
+	}, s.index.Logger)
 
 	return nil
 }
@@ -978,7 +978,7 @@ func (s *Shard) drop() (err error) {
 	defer cancel()
 
 	// unregister all callbacks at once, in parallel
-	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.Logger,
 		s.cycleCallbacks.compactionCallbacksCtrl,
 		s.cycleCallbacks.flushCallbacksCtrl,
 		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
@@ -1300,7 +1300,7 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 		wg.Wait()
 		s.UpdateStatus(storagestate.StatusReady.String())
 	}
-	enterrors.GoWrapper(f, s.index.logger)
+	enterrors.GoWrapper(f, s.index.Logger)
 
 	return err
 }
@@ -1338,7 +1338,7 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 	}
 
 	// unregister all callbacks at once, in parallel
-	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.Logger,
 		s.cycleCallbacks.compactionCallbacksCtrl,
 		s.cycleCallbacks.flushCallbacksCtrl,
 		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
@@ -1398,7 +1398,7 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 	}
 
 	// unregister all callbacks at once, in parallel
-	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.Logger,
 		s.cycleCallbacks.compactionCallbacksCtrl,
 		s.cycleCallbacks.flushCallbacksCtrl,
 		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
@@ -1428,7 +1428,7 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 // cleanupPartialInit is called when the shard was only partially initialized.
 // Internally it just uses [Shutdown], but also adds some logging.
 func (s *Shard) cleanupPartialInit(ctx context.Context) {
-	log := s.index.logger.WithField("action", "cleanup_partial_initialization")
+	log := s.index.Logger.WithField("action", "cleanup_partial_initialization")
 	if err := s.Shutdown(ctx); err != nil {
 		log.WithError(err).Error("failed to shutdown store")
 	}
@@ -1497,7 +1497,7 @@ func (s *Shard) checkEligibleForShutdown() (eligible bool, err error) {
 
 func (s *Shard) NotifyReady() {
 	s.initStatus()
-	s.index.logger.
+	s.index.Logger.
 		WithField("action", "startup").
 		Debugf("shard=%s is ready", s.name)
 }

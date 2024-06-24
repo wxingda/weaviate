@@ -219,7 +219,7 @@ func (db *DB) CrossClassVectorSearch(ctx context.Context, vector []float32, targ
 			found = append(found, storobj.SearchResultsWithDists(objs, additional.Properties{}, dist)...)
 			mutex.Unlock()
 		}
-		enterrors.GoWrapper(f, index.logger)
+		enterrors.GoWrapper(f, index.Logger)
 	}
 	db.indexLock.RUnlock()
 

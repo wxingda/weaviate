@@ -20,7 +20,7 @@ import (
 	enthnsw "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
 )
 
-type indexCycleCallbacks struct {
+type IndexCycleCallbacks struct {
 	compactionCallbacks cyclemanager.CycleCallbackGroup
 	compactionCycle     cyclemanager.CycleManager
 
@@ -38,9 +38,9 @@ type indexCycleCallbacks struct {
 	geoPropsTombstoneCleanupCycle     cyclemanager.CycleManager
 }
 
-func (index *Index) initCycleCallbacks() {
+func (index *Index) InitCycleCallbacks() {
 	vectorTombstoneCleanupIntervalSeconds := hnsw.DefaultCleanupIntervalSeconds
-	if hnswUserConfig, ok := index.vectorIndexUserConfig.(hnsw.UserConfig); ok {
+	if hnswUserConfig, ok := index.VectorIndexUserConfig.(hnsw.UserConfig); ok {
 		vectorTombstoneCleanupIntervalSeconds = hnswUserConfig.CleanupIntervalSeconds
 	}
 
@@ -49,17 +49,17 @@ func (index *Index) initCycleCallbacks() {
 		return strings.Join(elems, "/")
 	}
 
-	compactionCallbacks := cyclemanager.NewCallbackGroup(id("compaction"), index.logger, _NUMCPU*2)
+	compactionCallbacks := cyclemanager.NewCallbackGroup(id("compaction"), index.Logger, _NUMCPU*2)
 	compactionCycle := cyclemanager.NewManager(
 		cyclemanager.CompactionCycleTicker(),
-		compactionCallbacks.CycleCallback, index.logger)
+		compactionCallbacks.CycleCallback, index.Logger)
 
-	flushCallbacks := cyclemanager.NewCallbackGroup(id("flush"), index.logger, _NUMCPU*2)
+	flushCallbacks := cyclemanager.NewCallbackGroup(id("flush"), index.Logger, _NUMCPU*2)
 	flushCycle := cyclemanager.NewManager(
 		cyclemanager.MemtableFlushCycleTicker(),
-		flushCallbacks.CycleCallback, index.logger)
+		flushCallbacks.CycleCallback, index.Logger)
 
-	vectorCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(id("vector", "commit_logger"), index.logger, _NUMCPU*2)
+	vectorCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(id("vector", "commit_logger"), index.Logger, _NUMCPU*2)
 	// Previously we had an interval of 10s in here, which was changed to
 	// 0.5s as part of gh-1867. There's really no way to wait so long in
 	// between checks: If you are running on a low-powered machine, the
@@ -78,24 +78,24 @@ func (index *Index) initCycleCallbacks() {
 	// introduced to address https://github.com/weaviate/weaviate/issues/2783
 	vectorCommitLoggerCycle := cyclemanager.NewManager(
 		cyclemanager.HnswCommitLoggerCycleTicker(),
-		vectorCommitLoggerCallbacks.CycleCallback, index.logger)
+		vectorCommitLoggerCallbacks.CycleCallback, index.Logger)
 
-	vectorTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(id("vector", "tombstone_cleanup"), index.logger, _NUMCPU*2)
+	vectorTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(id("vector", "tombstone_cleanup"), index.Logger, _NUMCPU*2)
 	vectorTombstoneCleanupCycle := cyclemanager.NewManager(
 		cyclemanager.NewFixedTicker(time.Duration(vectorTombstoneCleanupIntervalSeconds)*time.Second),
-		vectorTombstoneCleanupCallbacks.CycleCallback, index.logger)
+		vectorTombstoneCleanupCallbacks.CycleCallback, index.Logger)
 
-	geoPropsCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(id("geo_props", "commit_logger"), index.logger, _NUMCPU*2)
+	geoPropsCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(id("geo_props", "commit_logger"), index.Logger, _NUMCPU*2)
 	geoPropsCommitLoggerCycle := cyclemanager.NewManager(
 		cyclemanager.GeoCommitLoggerCycleTicker(),
-		geoPropsCommitLoggerCallbacks.CycleCallback, index.logger)
+		geoPropsCommitLoggerCallbacks.CycleCallback, index.Logger)
 
-	geoPropsTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(id("geo_props", "tombstone_cleanup"), index.logger, _NUMCPU*2)
+	geoPropsTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(id("geo_props", "tombstone_cleanup"), index.Logger, _NUMCPU*2)
 	geoPropsTombstoneCleanupCycle := cyclemanager.NewManager(
 		cyclemanager.NewFixedTicker(enthnsw.DefaultCleanupIntervalSeconds*time.Second),
-		geoPropsTombstoneCleanupCallbacks.CycleCallback, index.logger)
+		geoPropsTombstoneCleanupCallbacks.CycleCallback, index.Logger)
 
-	index.cycleCallbacks = &indexCycleCallbacks{
+	index.CycleCallbacks = &IndexCycleCallbacks{
 		compactionCallbacks: compactionCallbacks,
 		compactionCycle:     compactionCycle,
 		flushCallbacks:      flushCallbacks,
@@ -114,7 +114,7 @@ func (index *Index) initCycleCallbacks() {
 }
 
 func (index *Index) initCycleCallbacksNoop() {
-	index.cycleCallbacks = &indexCycleCallbacks{
+	index.CycleCallbacks = &IndexCycleCallbacks{
 		compactionCallbacks: cyclemanager.NewCallbackGroupNoop(),
 		compactionCycle:     cyclemanager.NewManagerNoop(),
 		flushCallbacks:      cyclemanager.NewCallbackGroupNoop(),

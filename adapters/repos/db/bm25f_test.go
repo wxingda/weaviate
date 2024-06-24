@@ -713,7 +713,7 @@ func TestBM25FCompare(t *testing.T) {
 	idx := repo.GetIndex("MyClass")
 	require.NotNil(t, idx)
 
-	shardNames := idx.getSchema.CopyShardingState(idx.Config.ClassName.String()).AllPhysicalShards()
+	shardNames := idx.GetSchema.CopyShardingState(idx.Config.ClassName.String()).AllPhysicalShards()
 
 	for _, shardName := range shardNames {
 		shard := idx.shards.Load(shardName)

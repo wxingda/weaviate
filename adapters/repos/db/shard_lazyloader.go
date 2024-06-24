@@ -114,7 +114,7 @@ func (l *LazyLoadShard) Load(ctx context.Context) error {
 		l.shardOpts.class, l.shardOpts.jobQueueCh, l.shardOpts.indexCheckpoints)
 	if err != nil {
 		msg := fmt.Sprintf("Unable to load shard %s: %v", l.shardOpts.name, err)
-		l.shardOpts.index.logger.WithField("error", "shard_load").WithError(err).Error(msg)
+		l.shardOpts.index.Logger.WithField("error", "shard_load").WithError(err).Error(msg)
 		return errors.New(msg)
 	}
 	l.shard = shard
@@ -311,13 +311,13 @@ func (l *LazyLoadShard) drop() error {
 		shardName := l.shardOpts.name
 
 		// cleanup metrics
-		NewMetrics(idx.logger, l.shardOpts.promMetrics, className, shardName).
+		NewMetrics(idx.Logger, l.shardOpts.promMetrics, className, shardName).
 			DeleteShardLabels(className, shardName)
 
 		// cleanup dimensions
 		if idx.Config.TrackVectorDimensions {
 			clearDimensionMetrics(l.shardOpts.promMetrics, className, shardName,
-				idx.vectorIndexUserConfig, idx.vectorIndexUserConfigs)
+				idx.VectorIndexUserConfig, idx.vectorIndexUserConfigs)
 		}
 
 		// cleanup queue

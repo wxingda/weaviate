@@ -32,7 +32,7 @@ func (s *Shard) groupResults(ctx context.Context, ids []uint64,
 ) ([]*storobj.Object, []float32, error) {
 	objsBucket := s.store.Bucket(helpers.ObjectsBucketLSM)
 	className := s.index.Config.ClassName
-	class := s.index.getSchema.ReadOnlyClass(className.String())
+	class := s.index.GetSchema.ReadOnlyClass(className.String())
 	if class == nil {
 		return nil, nil, fmt.Errorf("could not find class %s in schema", className)
 	}
@@ -40,7 +40,7 @@ func (s *Shard) groupResults(ctx context.Context, ids []uint64,
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: unrecognized property: %s", err, groupBy.Property)
 	}
-	dt, err := schema.FindPropertyDataTypeWithRefs(s.index.getSchema.ReadOnlyClass, prop.DataType, false, "")
+	dt, err := schema.FindPropertyDataTypeWithRefs(s.index.GetSchema.ReadOnlyClass, prop.DataType, false, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: unrecognized data type for property: %s", err, groupBy.Property)
 	}

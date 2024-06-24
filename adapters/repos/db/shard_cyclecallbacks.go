@@ -40,45 +40,45 @@ func (s *Shard) initCycleCallbacks() {
 	}
 
 	compactionId := id("compaction")
-	compactionCallbacks := cyclemanager.NewCallbackGroup(compactionId, s.index.logger, 1)
-	compactionCallbacksCtrl := s.index.cycleCallbacks.compactionCallbacks.Register(
+	compactionCallbacks := cyclemanager.NewCallbackGroup(compactionId, s.index.Logger, 1)
+	compactionCallbacksCtrl := s.index.CycleCallbacks.compactionCallbacks.Register(
 		compactionId, compactionCallbacks.CycleCallback,
 		cyclemanager.WithIntervals(cyclemanager.CompactionCycleIntervals()))
 
 	flushId := id("flush")
-	flushCallbacks := cyclemanager.NewCallbackGroup(flushId, s.index.logger, 1)
-	flushCallbacksCtrl := s.index.cycleCallbacks.flushCallbacks.Register(
+	flushCallbacks := cyclemanager.NewCallbackGroup(flushId, s.index.Logger, 1)
+	flushCallbacksCtrl := s.index.CycleCallbacks.flushCallbacks.Register(
 		flushId, flushCallbacks.CycleCallback,
 		cyclemanager.WithIntervals(cyclemanager.MemtableFlushCycleIntervals()))
 
 	vectorCommitLoggerId := id("vector", "commit_logger")
-	vectorCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(vectorCommitLoggerId, s.index.logger, 1)
-	vectorCommitLoggerCallbacksCtrl := s.index.cycleCallbacks.vectorCommitLoggerCallbacks.Register(
+	vectorCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(vectorCommitLoggerId, s.index.Logger, 1)
+	vectorCommitLoggerCallbacksCtrl := s.index.CycleCallbacks.vectorCommitLoggerCallbacks.Register(
 		vectorCommitLoggerId, vectorCommitLoggerCallbacks.CycleCallback,
 		cyclemanager.WithIntervals(cyclemanager.HnswCommitLoggerCycleIntervals()))
 
 	vectorTombstoneCleanupId := id("vector", "tombstone_cleanup")
-	vectorTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(vectorTombstoneCleanupId, s.index.logger, 1)
+	vectorTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(vectorTombstoneCleanupId, s.index.Logger, 1)
 	// fixed interval on class level, no need to specify separate on shard level
-	vectorTombstoneCleanupCallbacksCtrl := s.index.cycleCallbacks.vectorTombstoneCleanupCallbacks.Register(
+	vectorTombstoneCleanupCallbacksCtrl := s.index.CycleCallbacks.vectorTombstoneCleanupCallbacks.Register(
 		vectorTombstoneCleanupId, vectorTombstoneCleanupCallbacks.CycleCallback)
 
-	vectorCombinedCallbacksCtrl := cyclemanager.NewCombinedCallbackCtrl(2, s.index.logger,
+	vectorCombinedCallbacksCtrl := cyclemanager.NewCombinedCallbackCtrl(2, s.index.Logger,
 		vectorCommitLoggerCallbacksCtrl, vectorTombstoneCleanupCallbacksCtrl)
 
 	geoPropsCommitLoggerId := id("geo_props", "commit_logger")
-	geoPropsCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(geoPropsCommitLoggerId, s.index.logger, 1)
-	geoPropsCommitLoggerCallbacksCtrl := s.index.cycleCallbacks.geoPropsCommitLoggerCallbacks.Register(
+	geoPropsCommitLoggerCallbacks := cyclemanager.NewCallbackGroup(geoPropsCommitLoggerId, s.index.Logger, 1)
+	geoPropsCommitLoggerCallbacksCtrl := s.index.CycleCallbacks.geoPropsCommitLoggerCallbacks.Register(
 		geoPropsCommitLoggerId, geoPropsCommitLoggerCallbacks.CycleCallback,
 		cyclemanager.WithIntervals(cyclemanager.GeoCommitLoggerCycleIntervals()))
 
 	geoPropsTombstoneCleanupId := id("geoProps", "tombstone_cleanup")
-	geoPropsTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(geoPropsTombstoneCleanupId, s.index.logger, 1)
+	geoPropsTombstoneCleanupCallbacks := cyclemanager.NewCallbackGroup(geoPropsTombstoneCleanupId, s.index.Logger, 1)
 	// fixed interval on class level, no need to specify separate on shard level
-	geoPropsTombstoneCleanupCallbacksCtrl := s.index.cycleCallbacks.geoPropsTombstoneCleanupCallbacks.Register(
+	geoPropsTombstoneCleanupCallbacksCtrl := s.index.CycleCallbacks.geoPropsTombstoneCleanupCallbacks.Register(
 		geoPropsTombstoneCleanupId, geoPropsTombstoneCleanupCallbacks.CycleCallback)
 
-	geoPropsCombinedCallbacksCtrl := cyclemanager.NewCombinedCallbackCtrl(2, s.index.logger,
+	geoPropsCombinedCallbacksCtrl := cyclemanager.NewCombinedCallbackCtrl(2, s.index.Logger,
 		geoPropsCommitLoggerCallbacksCtrl, geoPropsTombstoneCleanupCallbacksCtrl)
 
 	s.cycleCallbacks = &shardCycleCallbacks{

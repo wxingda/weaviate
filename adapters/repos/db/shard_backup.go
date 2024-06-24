@@ -89,7 +89,7 @@ func (s *Shard) ListBackupFiles(ctx context.Context, ret *backup.ShardDescriptor
 }
 
 func (s *Shard) resumeMaintenanceCycles(ctx context.Context) error {
-	g := enterrors.NewErrorGroupWrapper(s.index.logger)
+	g := enterrors.NewErrorGroupWrapper(s.index.Logger)
 
 	g.Go(func() error {
 		return s.store.ResumeCompaction(ctx)
@@ -139,7 +139,7 @@ func (s *Shard) readBackupMetadata(d *backup.ShardDescriptor) (err error) {
 }
 
 func (s *Shard) nodeName() string {
-	node, _ := s.index.getSchema.ShardOwner(
+	node, _ := s.index.GetSchema.ShardOwner(
 		s.index.Config.ClassName.String(), s.name)
 	return node
 }
