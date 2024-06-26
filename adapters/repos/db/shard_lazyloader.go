@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 
 	"github.com/go-openapi/strfmt"
@@ -281,6 +280,7 @@ func (l *LazyLoadShard) ID() string {
 }
 
 func (l *LazyLoadShard) drop() error {
+	/*
 	// if not loaded, execute simplified drop without loading shard:
 	// - perform required actions
 	// - remove entire shard directory
@@ -318,6 +318,8 @@ func (l *LazyLoadShard) drop() error {
 		return nil
 	}
 	l.mutex.Unlock()
+*/
+	l.mustLoad()
 
 	return l.shard.drop()
 }

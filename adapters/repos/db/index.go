@@ -203,16 +203,9 @@ type Index struct {
 	allShardsReady   atomic.Bool
 	allocChecker     memwatch.AllocChecker
 	shardCreateLocks *esync.KeyLocker
-}
 
-func (i *Index) GetShards() []ShardLike {
-	var out []ShardLike
-	i.shards.Range(func(_ string, shard ShardLike) error {
-		out = append(out, shard)
-		return nil
-	})
-
-	return out
+	closeLock sync.RWMutex
+	closed    bool
 }
 
 func (i *Index) ID() string {
@@ -421,10 +414,24 @@ func (i *Index) IterateObjects(ctx context.Context, cb func(index *Index, shard 
 }
 
 func (i *Index) ForEachShard(f func(name string, shard ShardLike) error) error {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
 	return i.shards.Range(f)
 }
 
 func (i *Index) ForEachShardConcurrently(f func(name string, shard ShardLike) error) error {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
 	return i.shards.RangeConcurrently(i.logger, f)
 }
 
@@ -1721,28 +1728,31 @@ func (i *Index) IncomingDeleteObject(ctx context.Context, shardName string,
 	return shard.DeleteObject(ctx, id)
 }
 
+func (i *Index) getClass() *models.Class {
+	className := i.Config.ClassName.String()
+	return i.getSchema.ReadOnlyClass(className)
+}
+
 // Intended to run on "receiver" nodes, where local shard
 // is expected to exist and be active
 // Method first tries to get shard from Index::shards map,
 // or inits shard and adds it to the map if shard was not found
-func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (ShardLike, error) {
-	className := i.Config.ClassName.String()
-	class := i.getSchema.ReadOnlyClass(className)
-	return i.initLocalShard(ctx, class, shardName)
-}
-
-func (i *Index) initLocalShard(ctx context.Context, class *models.Class, shardName string) (ShardLike, error) {
-	return i.optInitLocalShard(ctx, class, shardName, !i.Config.DisableLazyLoadShards)
+func (i *Index) initLocalShard(ctx context.Context, shardName string) error {
+	return i.optInitLocalShard(ctx, i.getClass(), shardName, !i.Config.DisableLazyLoadShards)
 }
 
 func (i *Index) loadLocalShard(ctx context.Context, shardName string) error {
-	className := i.Config.ClassName.String()
-	class := i.getSchema.ReadOnlyClass(className)
-	_, err := i.optInitLocalShard(ctx, class, shardName, true)
-	return err
+	return i.optInitLocalShard(ctx, i.getClass(), shardName, true)
 }
 
-func (i *Index) optInitLocalShard(ctx context.Context, class *models.Class, shardName string, disableLazyLoad bool) (ShardLike, error) {
+func (i *Index) optInitLocalShard(ctx context.Context, class *models.Class, shardName string, disableLazyLoad bool) error {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
 	// make sure same shard is not inited in parallel
 	i.shardCreateLocks.Lock(shardName)
 	defer i.shardCreateLocks.Unlock(shardName)
@@ -1752,26 +1762,33 @@ func (i *Index) optInitLocalShard(ctx context.Context, class *models.Class, shar
 		if disableLazyLoad {
 			asLL, ok := shard.(*LazyLoadShard)
 			if ok {
-				return asLL, asLL.Load(ctx)
+				return asLL.Load(ctx)
 			}
 		}
 
-		return shard, nil
+		return nil
 	}
 
 	shard, err := i.initShard(ctx, shardName, class, i.metrics.baseMetrics, disableLazyLoad)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	i.shards.Store(shardName, shard)
 
-	return shard, nil
+	return nil
 }
 
 func (i *Index) getLocalShardNoShutdown(shardName string) (
 	shard ShardLike, release func(), err error,
 ) {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return nil, func() {}, errAlreadyShutdown
+	}
+
 	// make sure same shard is not inited in parallel
 	i.shardCreateLocks.Lock(shardName)
 	defer i.shardCreateLocks.Unlock(shardName)
@@ -1793,6 +1810,13 @@ func (i *Index) getLocalShardNoShutdown(shardName string) (
 func (i *Index) getOrInitLocalShardNoShutdown(ctx context.Context, shardName string) (
 	shard ShardLike, release func(), err error,
 ) {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return nil, func() {}, errAlreadyShutdown
+	}
+
 	className := i.Config.ClassName.String()
 	class := i.getSchema.ReadOnlyClass(className)
 
@@ -1939,6 +1963,15 @@ func (i *Index) IncomingAggregate(ctx context.Context, shardName string,
 }
 
 func (i *Index) drop() error {
+	i.closeLock.Lock()
+	defer i.closeLock.Unlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
+	i.closed = true
+
 	i.closingCancel()
 
 	eg := enterrors.NewErrorGroupWrapper(i.logger)
@@ -1978,6 +2011,13 @@ func (i *Index) drop() error {
 }
 
 func (i *Index) dropShards(names []string) error {
+	i.closeLock.RLock()
+	defer i.closeLock.RUnlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
 	i.backupMutex.RLock()
 	defer i.backupMutex.RUnlock()
 
@@ -2012,6 +2052,15 @@ func (i *Index) dropShards(names []string) error {
 }
 
 func (i *Index) Shutdown(ctx context.Context) error {
+	i.closeLock.Lock()
+	defer i.closeLock.Unlock()
+
+	if i.closed {
+		return errAlreadyShutdown
+	}
+
+	i.closed = true
+
 	i.closingCancel()
 
 	i.backupMutex.RLock()

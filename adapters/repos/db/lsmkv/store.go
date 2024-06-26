@@ -50,6 +50,8 @@ type Store struct {
 	// Prevent concurrent manipulations to the same Bucket, specially if there is
 	// action on the bucket in the meantime.
 	bucketsLocks *wsync.KeyLocker
+
+	closed bool
 }
 
 // New initializes a new [Store] based on the root dir. If state is present on
@@ -173,12 +175,18 @@ func (s *Store) setBucket(name string, b *Bucket) {
 	s.bucketAccessLock.Lock()
 	defer s.bucketAccessLock.Unlock()
 
+	if s.closed {
+		panic("adding a bucket to an already closed store")
+	}
+
 	s.bucketsByName[name] = b
 }
 
 func (s *Store) Shutdown(ctx context.Context) error {
 	s.bucketAccessLock.RLock()
 	defer s.bucketAccessLock.RUnlock()
+
+	s.closed = true
 
 	for name, bucket := range s.bucketsByName {
 		if err := bucket.Shutdown(ctx); err != nil {
