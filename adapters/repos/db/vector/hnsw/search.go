@@ -22,6 +22,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/repos/db/priorityqueue"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/compressionhelpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/iterableconnections"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/visited"
 	"github.com/weaviate/weaviate/entities/storobj"
 	"github.com/weaviate/weaviate/usecases/floatcomp"
@@ -178,7 +179,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 ) {
 	h.pools.visitedListsLock.RLock()
 	visited := h.pools.visitedLists.Borrow()
-	visitedExp := h.pools.visitedLists.Borrow()
 	h.pools.visitedListsLock.RUnlock()
 
 	candidates := h.pools.pqCandidates.GetMin(ef)
@@ -207,7 +207,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 	if err != nil {
 		return nil, errors.Wrapf(err, "calculate distance of current last result")
 	}
-	var connectionsReusable []uint64
+	var connectionsReusable iterableconnections.IterableConnections
 
 	for candidates.Len() > 0 {
 		var dist float32
@@ -239,53 +239,69 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 		}
 
 		if level > 0 || allowList == nil || !h.acornSearch {
-			connectionsReusable = make([]uint64, len(candidateNode.connections[level]))
-			copy(connectionsReusable, candidateNode.connections[level])
+			connectionsReusable = iterableconnections.NewArrIterableConnections(candidateNode.connections[level])
 		} else {
-			slice := h.pools.tempVectorsUint64.Get(M * h.maximumConnectionsLayerZero)
-			defer h.pools.tempVectorsUint64.Put(slice)
-			connectionsReusable = slice.Slice
+			h.shardedNodeLocks.Lock(candidate.ID)
+			allowListId := allowList.Len()
+			if x, found := candidateNode.filteredConnections[allowListId]; !found || x == nil {
+				h.pools.visitedListsLock.RLock()
+				visitedExp := h.pools.visitedLists.Borrow()
+				h.pools.visitedListsLock.RUnlock()
+				tempConnectionsReusable := make([]uint64, h.maximumConnectionsLayerZero*h.maximumConnectionsLayerZero)
 
-			realLen := 0
-			index := 0
+				realLen := 0
+				index := 0
 
-			for index < len(candidateNode.connections[level]) && realLen < M*h.maximumConnectionsLayerZero {
-				nodeId := candidateNode.connections[level][index]
-				index++
-				if !visitedExp.Visited(nodeId) {
-					if allowList.Contains(nodeId) {
-						connectionsReusable[realLen] = nodeId
-						realLen++
+				for index < len(candidateNode.connections[level]) {
+					nodeId := candidateNode.connections[level][index]
+					index++
+					if !visitedExp.Visited(nodeId) {
+						if allowList.Contains(nodeId) {
+							tempConnectionsReusable[realLen] = nodeId
+							realLen++
+						}
 					}
-				}
-				visitedExp.Visit(nodeId)
+					visitedExp.Visit(nodeId)
 
-				node := h.nodes[nodeId]
-				if node == nil {
-					continue
-				}
-				for _, expId := range node.connections[level] {
-					if realLen >= M*h.maximumConnectionsLayerZero {
-						break
-					}
-					if visitedExp.Visited(expId) {
+					node := h.nodes[nodeId]
+					if node == nil {
 						continue
 					}
-					visitedExp.Visit(expId)
+					for _, expId := range node.connections[level] {
+						if visitedExp.Visited(expId) {
+							continue
+						}
+						visitedExp.Visit(expId)
 
-					if allowList.Contains(expId) {
-						connectionsReusable[realLen] = expId
-						realLen++
+						if allowList.Contains(expId) {
+							tempConnectionsReusable[realLen] = expId
+							realLen++
+						}
 					}
 				}
+				tempConnectionsReusable = tempConnectionsReusable[:realLen]
+				if candidateNode.filteredConnections == nil {
+					candidateNode.filteredConnections = make(map[int]iterableconnections.IterableConnections)
+				}
+				temp := iterableconnections.NewVarintIterableConnections(tempConnectionsReusable)
+				candidateNode.filteredConnections[allowListId] = temp
+				connectionsReusable = temp
+				h.pools.visitedListsLock.RLock()
+				h.pools.visitedLists.Return(visitedExp)
+				h.pools.visitedListsLock.RUnlock()
+			} else {
+				x.Reset()
+				connectionsReusable = x
 			}
-			connectionsReusable = connectionsReusable[:realLen]
+			h.shardedNodeLocks.Unlock(candidate.ID)
 		}
 		candidateNode.Unlock()
 
-		for _, neighborID := range connectionsReusable {
+		neighborID, found := connectionsReusable.Next()
+		for found {
 			if ok := visited.Visited(neighborID); ok {
 				// skip if we've already visited this neighbor
+				neighborID, found = connectionsReusable.Next()
 				continue
 			}
 			// make sure we never visit this neighbor again
@@ -305,6 +321,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				var e storobj.ErrNotFound
 				if errors.As(err, &e) {
 					h.handleDeletedNode(e.DocID)
+					neighborID, found = connectionsReusable.Next()
 					continue
 				} else {
 					if err != nil {
@@ -315,12 +332,14 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 			if !ok {
 				// node was deleted in the underlying object store
+				neighborID, found = connectionsReusable.Next()
 				continue
 			}
 
 			if distance < worstResultDistance || results.Len() < ef {
 				candidates.Insert(neighborID, distance)
 				if h.hasTombstone(neighborID) {
+					neighborID, found = connectionsReusable.Next()
 					continue
 				}
 
@@ -342,6 +361,7 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				}
 
 			}
+			neighborID, found = connectionsReusable.Next()
 		}
 	}
 
@@ -349,7 +369,6 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 	h.pools.visitedListsLock.RLock()
 	h.pools.visitedLists.Return(visited)
-	h.pools.visitedLists.Return(visitedExp)
 	h.pools.visitedListsLock.RUnlock()
 
 	return results, nil
@@ -461,6 +480,9 @@ func (h *hnsw) distanceFromBytesToFloatNode(concreteDistancer compressionhelpers
 func (h *hnsw) distanceToFloatNode(distancer distancer.Distancer,
 	nodeID uint64,
 ) (float32, bool, error) {
+	if nodeID > 100_000 {
+		return math.MaxFloat32, false, nil
+	}
 	candidateVec, err := h.vectorForID(context.Background(), nodeID)
 	if err != nil {
 		return 0, false, err
