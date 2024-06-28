@@ -1738,7 +1738,7 @@ func (i *Index) getClass() *models.Class {
 // Method first tries to get shard from Index::shards map,
 // or inits shard and adds it to the map if shard was not found
 func (i *Index) initLocalShard(ctx context.Context, shardName string) error {
-	return i.optInitLocalShard(ctx, i.getClass(), shardName, !i.Config.DisableLazyLoadShards)
+	return i.optInitLocalShard(ctx, i.getClass(), shardName, i.Config.DisableLazyLoadShards)
 }
 
 func (i *Index) loadLocalShard(ctx context.Context, shardName string) error {

@@ -14,6 +14,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,15 @@ func (m *Migrator) AddClass(ctx context.Context, class *models.Class,
 
 	if err := replica.ValidateConfig(class, m.db.config.Replication); err != nil {
 		return fmt.Errorf("replication config: %w", err)
+	}
+
+	m.db.indexLock.Lock()
+	defer m.db.indexLock.Unlock()
+
+	_, exists := m.db.indices[strings.ToLower(class.Class)]
+	if exists {
+		panic("class already exists!")
+		// return fmt.Errorf("index for class %v not found locally", index)
 	}
 
 	idx, err := NewIndex(ctx,
@@ -108,10 +118,11 @@ func (m *Migrator) AddClass(ctx context.Context, class *models.Class,
 		}
 	}
 
-	m.db.indexLock.Lock()
+	if idx.ID() != strings.ToLower(class.Class) {
+		panic("class no match")
+	}
 	m.db.indices[idx.ID()] = idx
 	idx.notifyReady()
-	m.db.indexLock.Unlock()
 
 	return nil
 }
