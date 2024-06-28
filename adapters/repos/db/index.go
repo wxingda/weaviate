@@ -220,6 +220,11 @@ type nodeResolver interface {
 	NodeHostname(nodeName string) (string, bool)
 }
 
+var (
+	globalIndexMux sync.Mutex
+	globalIndexes  []string
+)
+
 // NewIndex creates an index with the specified amount of shards, using only
 // the shards that are local to a node
 func NewIndex(ctx context.Context, cfg IndexConfig,
@@ -234,6 +239,15 @@ func NewIndex(ctx context.Context, cfg IndexConfig,
 	indexCheckpoints *indexcheckpoint.Checkpoints,
 	allocChecker memwatch.AllocChecker,
 ) (*Index, error) {
+	globalIndexMux.Lock()
+	defer globalIndexMux.Unlock()
+
+	globalIndexes = append(globalIndexes, class.Class)
+
+	if len(globalIndexes) > 3 {
+		panic(fmt.Sprintf("more than 3 indexes: %v", globalIndexes))
+	}
+
 	sd, err := stopwords.NewDetectorFromConfig(invertedIndexConfig.Stopwords)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create new index")
