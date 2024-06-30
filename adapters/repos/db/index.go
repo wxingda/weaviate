@@ -1766,10 +1766,6 @@ func (i *Index) getOrInitLocalShardNoShutdown(ctx context.Context, shardName str
 // Method first tries to get shard from Index::shards map,
 // or inits shard and adds it to the map if shard was not found
 func (i *Index) getOrInitLocalShard(ctx context.Context, shardName string) (ShardLike, error) {
-	if shard := i.shards.Load(shardName); shard != nil {
-		return shard, nil
-	}
-
 	className := i.Config.ClassName.String()
 	class := i.getSchema.ReadOnlyClass(className)
 	return i.initLocalShard(ctx, shardName, class)
@@ -1780,7 +1776,6 @@ func (i *Index) initLocalShard(ctx context.Context, shardName string, class *mod
 	i.shardCreateLocks.Lock(shardName)
 	defer i.shardCreateLocks.Unlock(shardName)
 
-	// check if created in the meantime by concurrent call
 	if shard := i.shards.Load(shardName); shard != nil {
 		return shard, nil
 	}
