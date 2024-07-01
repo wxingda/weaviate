@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,7 +79,7 @@ type ShardLike interface {
 	Counter() *indexcounter.Counter
 	ObjectCount() int
 	ObjectCountAsync() int
-	GetPropertyLengthTracker() *inverted.JsonPropertyLengthTracker
+	GetPropertyLengthTracker() *inverted.JsonShardMetaData
 
 	PutObject(context.Context, *storobj.Object) error
 	PutObjectBatch(context.Context, []*storobj.Object) []error
@@ -136,12 +137,12 @@ type ShardLike interface {
 	filePutter(context.Context, string) (io.WriteCloser, error)
 
 	// TODO tests only
-	Dimensions() int // dim(vector)*number vectors
+	Dimensions(ctx context.Context) int // dim(vector)*number vectors
 	// TODO tests only
-	QuantizedDimensions(segments int) int
+	QuantizedDimensions(ctx context.Context, segments int) int
 	extendDimensionTrackerLSM(dimLength int, docID uint64) error
 	extendDimensionTrackerForVecLSM(dimLength int, docID uint64, vecName string) error
-	publishDimensionMetrics()
+	publishDimensionMetrics(ctx context.Context)
 
 	addToPropertySetBucket(bucket *lsmkv.Bucket, docID uint64, key []byte) error
 	addToPropertyMapBucket(bucket *lsmkv.Bucket, pair lsmkv.MapPair, key []byte) error
@@ -172,25 +173,28 @@ type ShardLike interface {
 // database files for all the objects it owns. How a shard is determined for a
 // target object (e.g. Murmur hash, etc.) is still open at this point
 type Shard struct {
-	index            *Index // a reference to the underlying index, which in turn contains schema information
-	queue            *IndexQueue
-	queues           map[string]*IndexQueue
-	name             string
-	store            *lsmkv.Store
-	counter          *indexcounter.Counter
-	indexCheckpoints *indexcheckpoint.Checkpoints
-	vectorIndex      VectorIndex
-	vectorIndexes    map[string]VectorIndex
-	metrics          *Metrics
-	promMetrics      *monitoring.PrometheusMetrics
-	propertyIndices  propertyspecific.Indices
-	propLenTracker   *inverted.JsonPropertyLengthTracker
-	versioner        *shardVersioner
+	index             *Index // a reference to the underlying index, which in turn contains schema information
+	queue             *IndexQueue
+	queues            map[string]*IndexQueue
+	name              string
+	store             *lsmkv.Store
+	counter           *indexcounter.Counter
+	indexCheckpoints  *indexcheckpoint.Checkpoints
+	vectorIndex       VectorIndex
+	vectorIndexes     map[string]VectorIndex
+	metrics           *Metrics
+	promMetrics       *monitoring.PrometheusMetrics
+	slowQueryReporter helpers.SlowQueryReporter
+	propertyIndices   propertyspecific.Indices
+	propLenTracker    *inverted.JsonShardMetaData
+	versioner         *shardVersioner
 
 	status              storagestate.Status
 	statusLock          sync.Mutex
 	propertyIndicesLock sync.RWMutex
-	stopMetrics         chan struct{}
+
+	stopDimensionTracking        chan struct{}
+	dimensionTrackingInitialized atomic.Bool
 
 	centralJobQueue chan job // reference to queue used by all shards
 
@@ -225,23 +229,48 @@ type Shard struct {
 func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 	shardName string, index *Index, class *models.Class, jobQueueCh chan job,
 	indexCheckpoints *indexcheckpoint.Checkpoints,
-) (*Shard, error) {
+) (_ *Shard, err error) {
 	before := time.Now()
-	var err error
+
 	s := &Shard{
 		index:       index,
 		name:        shardName,
 		promMetrics: promMetrics,
 		metrics: NewMetrics(index.logger, promMetrics,
 			string(index.Config.ClassName), shardName),
-		stopMetrics:      make(chan struct{}),
-		replicationMap:   pendingReplicaTasks{Tasks: make(map[string]replicaTask, 32)},
-		centralJobQueue:  jobQueueCh,
-		indexCheckpoints: indexCheckpoints,
+		slowQueryReporter:     helpers.NewSlowQueryReporterFromEnv(index.logger),
+		stopDimensionTracking: make(chan struct{}),
+		replicationMap:        pendingReplicaTasks{Tasks: make(map[string]replicaTask, 32)},
+		centralJobQueue:       jobQueueCh,
+		indexCheckpoints:      indexCheckpoints,
 
 		shut:         false,
 		shutdownLock: new(sync.RWMutex),
+
+		status: storagestate.StatusLoading,
 	}
+
+	defer func() {
+		p := recover()
+		if p != nil {
+			err = fmt.Errorf("unexpected error initializing shard %q of index %q: %v", shardName, index.ID(), p)
+			index.logger.WithError(err).WithFields(logrus.Fields{
+				"index": index.ID(),
+				"shard": shardName,
+			}).Error("panic during shard initialization")
+			debug.PrintStack()
+		}
+
+		if err != nil {
+			// spawn a new context as we cannot guarantee that the init context is
+			// still valid, but we want to make sure that we have enough time to clean
+			// up the partial init
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+
+			s.cleanupPartialInit(ctx)
+		}
+	}()
 
 	s.activityTracker.Store(1) // initial state
 	s.initCycleCallbacks()
@@ -336,8 +365,8 @@ func (s *Shard) initTargetVectors(ctx context.Context) error {
 func (s *Shard) initTargetQueues() error {
 	s.queues = make(map[string]*IndexQueue)
 	for targetVector, vectorIndex := range s.vectorIndexes {
-		queue, err := NewIndexQueue(s.ID(), targetVector, s, vectorIndex, s.centralJobQueue,
-			s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger})
+		queue, err := NewIndexQueue(s.index.Config.ClassName.String(), s.ID(), targetVector, s, vectorIndex, s.centralJobQueue,
+			s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger}, s.promMetrics)
 		if err != nil {
 			return fmt.Errorf("cannot create index queue for %q: %w", targetVector, err)
 		}
@@ -356,8 +385,8 @@ func (s *Shard) initLegacyVector(ctx context.Context) error {
 }
 
 func (s *Shard) initLegacyQueue() error {
-	queue, err := NewIndexQueue(s.ID(), "", s, s.vectorIndex, s.centralJobQueue,
-		s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger})
+	queue, err := NewIndexQueue(s.index.Config.ClassName.String(), s.ID(), "", s, s.vectorIndex, s.centralJobQueue,
+		s.indexCheckpoints, IndexQueueOptions{Logger: s.index.logger}, s.promMetrics)
 	if err != nil {
 		return err
 	}
@@ -430,7 +459,8 @@ func (s *Shard) initVectorIndex(ctx context.Context,
 						hnsw.WithCommitlogThreshold(s.index.Config.HNSWMaxLogSize/5),
 					)
 				},
-				AllocChecker: s.index.allocChecker,
+				AllocChecker:        s.index.allocChecker,
+				WaitForCachePrefill: s.index.Config.HNSWWaitForCachePrefill,
 			}, hnswUserConfig, s.cycleCallbacks.vectorTombstoneCleanupCallbacks,
 				s.cycleCallbacks.compactionCallbacks, s.cycleCallbacks.flushCallbacks, s.store)
 			if err != nil {
@@ -532,7 +562,7 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 	s.versioner = versioner
 
 	plPath := path.Join(s.path(), "proplengths")
-	tracker, err := inverted.NewJsonPropertyLengthTracker(plPath, s.index.logger)
+	tracker, err := inverted.NewJsonShardMetaData(plPath, s.index.logger)
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: prop length tracker", s.ID())
 	}
@@ -631,7 +661,7 @@ func (s *Shard) drop() (err error) {
 	if s.index.Config.TrackVectorDimensions {
 		// tracking vector dimensions goroutine only works when tracking is enabled
 		// that's why we are trying to stop it only in this case
-		s.stopMetrics <- struct{}{}
+		s.stopDimensionTracking <- struct{}{}
 		// send 0 in when index gets dropped
 		s.clearDimensionMetrics()
 	}
@@ -977,8 +1007,6 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 		true
 			fail request
 
-
-
 	shutdown
 		loop + time:
 		if shut == true
@@ -986,19 +1014,15 @@ func (s *Shard) UpdateVectorIndexConfigs(ctx context.Context, updated map[string
 		in_use == 0 && shut == false
 			shut = true
 
-
-
 */
-
+// Shutdown needs to be idempotent, so it can also deal with a partial
+// initialization. In some parts, it relies on the underlying structs to have
+// idempotent Shutdown methods. In other parts, it explicitly checks if a
+// component was initialized. If not, it turns it into a noop to prevent
+// blocking.
 func (s *Shard) Shutdown(ctx context.Context) (err error) {
 	if err = s.waitForShutdown(ctx); err != nil {
 		return
-	}
-
-	if s.index.Config.TrackVectorDimensions {
-		// tracking vector dimensions goroutine only works when tracking is enabled
-		// that's why we are trying to stop it only in this case
-		s.stopMetrics <- struct{}{}
 	}
 
 	if err = s.GetPropertyLengthTracker().Close(); err != nil {
@@ -1023,6 +1047,12 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 			}
 		}
 		for targetVector, vectorIndex := range s.vectorIndexes {
+			if vectorIndex == nil {
+				// a nil-vector index during shutdown would indicate that the shard was not
+				// fully initialized, the vector index shutdown becomes a no-op
+				continue
+			}
+
 			if err = vectorIndex.Flush(); err != nil {
 				return fmt.Errorf("flush vector index commitlog of vector %q: %w", targetVector, err)
 			}
@@ -1034,24 +1064,61 @@ func (s *Shard) Shutdown(ctx context.Context) (err error) {
 		if err = s.queue.Close(); err != nil {
 			return errors.Wrap(err, "shut down vector index queue")
 		}
-		// to ensure that all commitlog entries are written to disk.
-		// otherwise in some cases the tombstone cleanup process'
-		// 'RemoveTombstone' entry is not picked up on restarts
-		// resulting in perpetually attempting to remove a tombstone
-		// which doesn't actually exist anymore
-		if err = s.vectorIndex.Flush(); err != nil {
-			return errors.Wrap(err, "flush vector index commitlog")
-		}
-		if err = s.vectorIndex.Shutdown(ctx); err != nil {
-			return errors.Wrap(err, "shut down vector index")
+		if s.vectorIndex != nil {
+			// a nil-vector index during shutdown would indicate that the shard was not
+			// fully initialized, the vector index shutdown becomes a no-op
+
+			// to ensure that all commitlog entries are written to disk.
+			// otherwise in some cases the tombstone cleanup process'
+			// 'RemoveTombstone' entry is not picked up on restarts
+			// resulting in perpetually attempting to remove a tombstone
+			// which doesn't actually exist anymore
+			if err = s.vectorIndex.Flush(); err != nil {
+				return errors.Wrap(err, "flush vector index commitlog")
+			}
+			if err = s.vectorIndex.Shutdown(ctx); err != nil {
+				return errors.Wrap(err, "shut down vector index")
+			}
 		}
 	}
 
-	if err = s.store.Shutdown(ctx); err != nil {
-		return errors.Wrap(err, "stop lsmkv store")
+	// unregister all callbacks at once, in parallel
+	if err = cyclemanager.NewCombinedCallbackCtrl(0, s.index.logger,
+		s.cycleCallbacks.compactionCallbacksCtrl,
+		s.cycleCallbacks.flushCallbacksCtrl,
+		s.cycleCallbacks.vectorCombinedCallbacksCtrl,
+		s.cycleCallbacks.geoPropsCombinedCallbacksCtrl,
+	).Unregister(ctx); err != nil {
+		return err
+	}
+
+	if s.store != nil {
+		// store would be nil if loading the objects bucket failed, as we would
+		// only return the store on success from s.initLSMStore()
+		if err = s.store.Shutdown(ctx); err != nil {
+			return errors.Wrap(err, "stop lsmkv store")
+		}
+	}
+
+	if s.dimensionTrackingInitialized.Load() {
+		// tracking vector dimensions goroutine only works when tracking is enabled
+		// _and_ when initialization completed, that's why we are trying to stop it
+		// only in this case
+		s.stopDimensionTracking <- struct{}{}
 	}
 
 	return nil
+}
+
+// cleanupPartialInit is called when the shard was only partially initialized.
+// Internally it just uses [Shutdown], but also adds some logging.
+func (s *Shard) cleanupPartialInit(ctx context.Context) {
+	log := s.index.logger.WithField("action", "cleanup_partial_initialization")
+	if err := s.Shutdown(ctx); err != nil {
+		log.WithError(err).Error("failed to shutdown store")
+	}
+
+	log.Debug("successfully cleaned up partially initialized shard")
 }
 
 func (s *Shard) preventShutdown() (release func(), err error) {

@@ -394,6 +394,10 @@ func FromEnv(config *Config) error {
 		config.DisableTelemetry = true
 	}
 
+	if configbase.Enabled(os.Getenv("HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE")) {
+		config.HNSWStartupWaitForVectorCache = true
+	}
+
 	return nil
 }
 
@@ -454,14 +458,6 @@ func parseRAFTConfig(hostname string) (Raft, error) {
 		"RAFT_HEARTBEAT_TIMEOUT",
 		func(val int) { cfg.HeartbeatTimeout = time.Second * time.Duration(val) },
 		1, // raft default
-	); err != nil {
-		return cfg, err
-	}
-
-	if err := parsePositiveInt(
-		"RAFT_RECOVERY_TIMEOUT",
-		func(val int) { cfg.RecoveryTimeout = time.Second * time.Duration(val) },
-		3,
 	); err != nil {
 		return cfg, err
 	}
