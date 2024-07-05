@@ -480,12 +480,12 @@ func (h *hnsw) distanceFromBytesToFloatNode(concreteDistancer compressionhelpers
 func (h *hnsw) distanceToFloatNode(distancer distancer.Distancer,
 	nodeID uint64,
 ) (float32, bool, error) {
-	if nodeID > 100_000 {
-		return math.MaxFloat32, false, nil
-	}
 	candidateVec, err := h.vectorForID(context.Background(), nodeID)
 	if err != nil {
 		return 0, false, err
+	}
+	if candidateVec == nil {
+		return math.MaxFloat32, true, nil
 	}
 
 	dist, _, err := distancer.Distance(candidateVec)

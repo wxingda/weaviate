@@ -129,6 +129,12 @@ func (s *shardedLockCache[T]) All() [][]T {
 }
 
 func (s *shardedLockCache[T]) Get(ctx context.Context, id uint64) ([]T, error) {
+	s.maintenanceLock.RLock()
+	if id >= uint64(len(s.cache)) {
+		s.maintenanceLock.RUnlock()
+		return nil, nil
+	}
+	s.maintenanceLock.RUnlock()
 	s.shardedLocks.RLock(id)
 	vec := s.cache[id]
 	s.shardedLocks.RUnlock(id)
