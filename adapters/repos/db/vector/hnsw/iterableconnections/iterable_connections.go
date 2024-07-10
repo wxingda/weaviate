@@ -19,6 +19,7 @@ import (
 type IterableConnections interface {
 	Next() (uint64, bool)
 	Reset()
+	Copy() IterableConnections
 }
 
 type arrIterableConnections struct {
@@ -33,6 +34,10 @@ func NewArrIterableConnections(connections []uint64) IterableConnections {
 		index:    0,
 		elements: connectionsReusable,
 	}
+}
+
+func (ic *arrIterableConnections) Copy() IterableConnections {
+	return ic
 }
 
 func (ic *arrIterableConnections) Next() (uint64, bool) {
@@ -70,6 +75,14 @@ func NewVarintIterableConnections(connections []uint64) IterableConnections {
 	return &varintIterableConnections{
 		index:    0,
 		elements: finalArr,
+		acc:      0,
+	}
+}
+
+func (ic *varintIterableConnections) Copy() IterableConnections {
+	return &varintIterableConnections{
+		index:    0,
+		elements: ic.elements,
 		acc:      0,
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/weaviate/weaviate/adapters/repos/db/helpers"
 	"github.com/weaviate/weaviate/adapters/repos/db/priorityqueue"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/compressionhelpers"
@@ -286,12 +287,13 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 				temp := iterableconnections.NewVarintIterableConnections(tempConnectionsReusable)
 				candidateNode.filteredConnections[allowListId] = temp
 				connectionsReusable = temp
+				checkFilteredConnections(temp, tempConnectionsReusable, h.logger)
 				h.pools.visitedListsLock.RLock()
 				h.pools.visitedLists.Return(visitedExp)
 				h.pools.visitedListsLock.RUnlock()
 			} else {
 				x.Reset()
-				connectionsReusable = x
+				connectionsReusable = x.Copy()
 			}
 			h.shardedNodeLocks.Unlock(candidate.ID)
 		}
@@ -299,6 +301,15 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 
 		neighborID, found := connectionsReusable.Next()
 		for found {
+			if neighborID > 100_000 {
+				connectionsReusable.Reset()
+				x, found := connectionsReusable.Next()
+				for found {
+					h.logger.Error(x)
+
+				}
+				panic("here")
+			}
 			if ok := visited.Visited(neighborID); ok {
 				// skip if we've already visited this neighbor
 				neighborID, found = connectionsReusable.Next()
@@ -372,6 +383,19 @@ func (h *hnsw) searchLayerByVectorWithDistancer(queryVector []float32,
 	h.pools.visitedListsLock.RUnlock()
 
 	return results, nil
+}
+
+func checkFilteredConnections(temp iterableconnections.IterableConnections, tempConnectionsReusable []uint64, logger logrus.FieldLogger) {
+	x, found := temp.Next()
+	i := 0
+	for found {
+		if x != tempConnectionsReusable[i] || tempConnectionsReusable[i] > 100_000 {
+			logger.Error(tempConnectionsReusable, i)
+		}
+		i++
+		x, found = temp.Next()
+	}
+	temp.Reset()
 }
 
 func (h *hnsw) insertViableEntrypointsAsCandidatesAndResults(
