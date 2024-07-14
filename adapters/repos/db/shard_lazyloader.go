@@ -416,6 +416,11 @@ func (l *LazyLoadShard) Queues() map[string]*IndexQueue {
 	return l.shard.Queues()
 }
 
+func (l *LazyLoadShard) Reindex(ctx context.Context) error {
+	l.mustLoad()
+	return l.shard.Reindex(ctx)
+}
+
 func (l *LazyLoadShard) Shutdown(ctx context.Context) error {
 	if !l.isLoaded() {
 		return nil

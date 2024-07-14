@@ -15,6 +15,7 @@ import (
 	"container/list"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"runtime"
@@ -372,64 +373,9 @@ func (q *IndexQueue) PreloadShard(shard ShardLike) error {
 		q.metrics.Preload(start, counter)
 	}()
 
-	ctx := context.Background()
-
-	buf := make([]byte, 8)
-	for i := checkpoint; i < maxDocID; i++ {
-		binary.LittleEndian.PutUint64(buf, i)
-
-		v, err := shard.Store().Bucket(helpers.ObjectsBucketLSM).GetBySecondary(0, buf)
-		if err != nil {
-			return errors.Wrap(err, "get last indexed object")
-		}
-		if v == nil {
-			continue
-		}
-		obj, err := storobj.FromBinary(v)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal last indexed object")
-		}
-		id := obj.DocID
-		if q.targetVector == "" {
-			if shard.VectorIndex().ContainsNode(id) {
-				continue
-			}
-			if len(obj.Vector) == 0 {
-				continue
-			}
-		} else {
-			if shard.VectorIndexes() == nil {
-				return errors.Errorf("vector index doesn't exist for target vector %s", q.targetVector)
-			}
-			vectorIndex, ok := shard.VectorIndexes()[q.targetVector]
-			if !ok {
-				return errors.Errorf("vector index doesn't exist for target vector %s", q.targetVector)
-			}
-			if vectorIndex.ContainsNode(id) {
-				continue
-			}
-			if len(obj.Vectors) == 0 {
-				continue
-			}
-		}
-		counter++
-
-		var vector []float32
-		if q.targetVector == "" {
-			vector = obj.Vector
-		} else {
-			if len(obj.Vectors) > 0 {
-				vector = obj.Vectors[q.targetVector]
-			}
-		}
-		desc := vectorDescriptor{
-			id:     id,
-			vector: vector,
-		}
-		err = q.Push(ctx, desc)
-		if err != nil {
-			return err
-		}
+	counter, err = q.loadFromDisk(shard, q.targetVector, checkpoint)
+	if err != nil {
+		return errors.Wrap(err, "load vectors from disk")
 	}
 
 	q.Logger.
@@ -442,6 +388,82 @@ func (q *IndexQueue) PreloadShard(shard ShardLike) error {
 		Info("enqueued vectors from last indexed checkpoint")
 
 	return nil
+}
+
+func (q *IndexQueue) loadFromDisk(shard ShardLike, targetVector string, fromCheckpoint uint64) (int, error) {
+	maxDocID := shard.Counter().Get()
+
+	var counter int
+
+	ctx := context.Background()
+
+	bucket := shard.Store().Bucket(helpers.ObjectsBucketLSM)
+	var index VectorIndex
+	if targetVector == "" {
+		index = shard.VectorIndex()
+	} else {
+		indexes := shard.VectorIndexes()
+		if indexes == nil {
+			return 0, errors.Errorf("vector index doesn't exist for target vector %s", q.targetVector)
+		}
+		var ok bool
+		index, ok = indexes[targetVector]
+		if !ok {
+			return 0, errors.Errorf("vector index doesn't exist for target vector %s", q.targetVector)
+		}
+	}
+
+	buf := make([]byte, 8)
+	for i := fromCheckpoint; i < maxDocID; i++ {
+		binary.LittleEndian.PutUint64(buf, i)
+
+		v, err := bucket.GetBySecondary(0, buf)
+		if err != nil {
+			return 0, errors.Wrap(err, "get last indexed object")
+		}
+		if v == nil {
+			continue
+		}
+
+		obj, err := storobj.FromBinary(v)
+		if err != nil {
+			return 0, errors.Wrap(err, "unmarshal last indexed object")
+		}
+
+		id := obj.DocID
+		if index.ContainsNode(id) {
+			continue
+		}
+
+		var vector []float32
+
+		if targetVector == "" {
+			if len(obj.Vector) == 0 {
+				continue
+			}
+			vector = obj.Vector
+
+		} else {
+			if len(obj.Vectors) == 0 {
+				fmt.Println("no vectors in object", id)
+				continue
+			}
+
+			vector = obj.Vectors[q.targetVector]
+		}
+		counter++
+
+		desc := vectorDescriptor{
+			id:     id,
+			vector: vector,
+		}
+		err = q.Push(ctx, desc)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return counter, nil
 }
 
 // Drop removes all persisted data related to the queue.
@@ -576,6 +598,7 @@ func (q *IndexQueue) logStats(vectorsSent int64) {
 	q.Logger.
 		WithField("queue_size", qSize).
 		WithField("vectors_sent", vectorsSent).
+		WithField("target_vector", q.targetVector).
 		Debug("queue stats")
 }
 
